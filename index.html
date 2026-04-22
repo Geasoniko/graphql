@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>01 — Profile</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="login-page">
+  <div class="grid-bg"></div>
+  <div class="login-card fade-up">
+    <div class="login-logo">
+      <div class="login-logo-mark">01</div>
+      <div class="login-logo-text"><span>yessen</span>ov.yu.edu.kz</div>
+    </div>
+    <h2>Sign in</h2>
+    <p class="login-sub">Access your academic profile and statistics.</p>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="field">
+      <label for="identifier">Username or Email</label>
+      <input type="text" id="identifier" placeholder="your_login or email@example.com" autocomplete="username" />
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
+    </div>
+
+    <button class="btn" id="login-btn" onclick="doLogin()">Sign In →</button>
+  </div>
+</div>
+
+<div id="dashboard">
+
+  <nav class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-logo">01</div>
+      <span class="topbar-title">Profile</span>
+    </div>
+    <div class="topbar-right">
+      <div class="user-pill">
+        <div class="user-avatar" id="avatar-initials">?</div>
+        <span class="user-login" id="topbar-login">loading…</span>
+      </div>
+      <button class="logout-btn" onclick="doLogout()">Log out</button>
+    </div>
+  </nav>
+
+  <div class="main" id="main-content">
+    <div class="loader" id="dashboard-loader">
+      <div class="spinner"></div>
+      Loading your data…
+    </div>
+  </div>
+
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
