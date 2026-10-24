@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1c1420" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Наша галерея</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💕</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ============ МЕНЮ ============ -->
+<div id="menu" class="screen">
+  <div class="card">
+    <h1>Наша галерея <span class="beat">💕</span></h1>
+    <p class="sub">Прогулка вдвоём по галерее наших фото</p>
+
+    <div class="label">Выберите персонажа</div>
+    <div class="chars">
+      <button class="char-btn selected" data-kind="girl"><span class="emoji">👧</span>Девушка</button>
+      <button class="char-btn" data-kind="boy"><span class="emoji">👦</span>Парень</button>
+    </div>
+
+    <input id="name" class="input" placeholder="Ваше имя" maxlength="16" autocomplete="off" />
+
+    <button id="btn-host" class="btn primary">💌 Создать комнату</button>
+    <div class="join-row">
+      <input id="code" class="input" placeholder="Код комнаты" maxlength="6" autocomplete="off" />
+      <button id="btn-join" class="btn">Войти</button>
+    </div>
+    <button id="btn-solo" class="btn ghost">🚶 Гулять одному</button>
+
+    <div id="menu-status"></div>
+  </div>
+</div>
+
+<!-- ============ HUD ============ -->
+<div id="hud" hidden>
+  <div class="top">
+    <div id="room-info"></div>
+    <div class="top-btns">
+      <button id="btn-photos" class="icon-btn" title="Фото">🖼️</button>
+      <button id="btn-sound" class="icon-btn" title="Звук">🔊</button>
+      <button id="btn-help" class="icon-btn" title="Управление">❓</button>
+    </div>
+  </div>
+
+  <div id="joystick"><div id="stick"></div></div>
+
+  <div id="emotes">
+    <button data-emote="dance1"><span>🕺</span><small>Танец 1</small></button>
+    <button data-emote="dance2"><span>💃</span><small>Танец 2</small></button>
+    <button data-emote="waltz"><span>💞</span><small>Вальс</small></button>
+    <button data-emote="kiss"><span>💋</span><small>Поцелуй</small></button>
+    <button data-emote="wave"><span>👋</span><small>Привет</small></button>
+    <button data-emote="hearts"><span>❤️</span><small>Сердечки</small></button>
+  </div>
+
+  <button id="btn-view" class="pill" hidden>🔍 Смотреть фото</button>
+  <div id="toast"></div>
+</div>
+
+<!-- ============ ПРОСМОТР ФОТО ============ -->
+<div id="viewer" class="overlay" hidden>
+  <img id="viewer-img" alt="" referrerpolicy="no-referrer" />
+  <div id="viewer-caption"></div>
+  <button id="viewer-prev" class="nav-btn">‹</button>
+  <button id="viewer-next" class="nav-btn">›</button>
+  <button id="viewer-close" class="close-btn">✕</button>
+</div>
+
+<!-- ============ НАСТРОЙКА ФОТО ============ -->
+<div id="photos-panel" class="overlay" hidden>
+  <div class="card wide">
+    <button class="close-btn" data-close>✕</button>
+    <h2>🖼️ Фото для галереи</h2>
+    <p class="hint">
+      Вставьте ссылки на фото из <b>Google Drive</b> — по одной на строку.<br />
+      В Drive: «Поделиться» → «Все, у кого есть ссылка» → «Копировать ссылку».
+    </p>
+    <textarea id="photo-links" class="input" rows="7" placeholder="https://drive.google.com/file/d/.../view?usp=sharing"></textarea>
+    <div class="row">
+      <label class="btn small">📁 С устройства
+        <input id="photo-files" type="file" accept="image/*" multiple hidden />
+      </label>
+      <span id="upload-count" class="hint"></span>
+      <button id="clear-uploads" class="btn small ghost">Убрать загруженные</button>
+    </div>
+    <button id="photos-save" class="btn primary">Повесить в галерею ✨</button>
+    <p class="hint small">Фото увидите вы и ваш партнёр.</p>
+  </div>
+</div>
+
+<!-- ============ ПОМОЩЬ ============ -->
+<div id="help" class="overlay" hidden>
+  <div class="card wide">
+    <button class="close-btn" data-close>✕</button>
+    <h2>Управление</h2>
+    <div class="help-grid">
+      <div><b>💻 Ноутбук</b>
+        <ul>
+          <li><kbd>W A S D</kbd> / стрелки — ходить</li>
+          <li><kbd>Shift</kbd> — бежать</li>
+          <li>Мышь (зажать) — крутить камеру, колесо — приблизить</li>
+          <li><kbd>1</kbd>–<kbd>6</kbd> — эмоции</li>
+          <li><kbd>E</kbd> или клик по фото — смотреть фото</li>
+        </ul>
+      </div>
+      <div><b>📱 Телефон</b>
+        <ul>
+          <li>Джойстик слева — ходить (дальше — быстрее)</li>
+          <li>Провести пальцем по экрану — крутить камеру</li>
+          <li>Двумя пальцами — приблизить</li>
+          <li>Нажать на фото — смотреть</li>
+        </ul>
+      </div>
+    </div>
+    <p class="hint">💞 Вальс и 💋 поцелуй — совместные: подойдите к партнёру поближе. Чтобы закончить — просто идите.</p>
+  </div>
+</div>
+
+<script src="photos.js"></script>
+<script src="vendor/peerjs.min.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>
