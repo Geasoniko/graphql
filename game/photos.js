@@ -17,8 +17,13 @@ window.GALLERY_CONFIG = {
 
   // Ссылки на фото (Google Drive или любые прямые ссылки на картинки)
   photos: [
-    // 'https://drive.google.com/file/d/XXXXXXXXXXXXXXXXXXXXXXXX/view?usp=sharing',
-    // 'https://drive.google.com/file/d/YYYYYYYYYYYYYYYYYYYYYYYY/view?usp=sharing',
+    'https://drive.google.com/file/d/1zCI0UNRqZ726-qrvF10B4sf4qDqTX6cd/view?usp=drivesdk',
+    'https://drive.google.com/file/d/1PnEOngW5obAMIBUH06HYRfQkrxQwYldw/view?usp=drivesdk',
+    'https://drive.google.com/file/d/1gJKOl_JSdPjidxNqc43mVQ2bo109vu7p/view?usp=drivesdk',
+    'https://drive.google.com/file/d/1kUjHZpN_IcXJfSu7Qxy1mJxdKcByWZ_1/view?usp=drivesdk',
+    'https://drive.google.com/file/d/18tQ-PVxcpFzxPyr-41cqArDvVg8R-XHN/view?usp=drivesdk',
+    'https://drive.google.com/file/d/1uCPG81OVgGzFx9Kc4Fr2cmrEndYSLHkG/view?usp=drivesdk',
+    'https://drive.google.com/file/d/122RpN6M1ewUkXGzUVoJo1Q_zBoVMlOnW/view?usp=drivesdk',
   ],
 
   // Необязательно: ключ Google API (Drive API), чтобы можно было
