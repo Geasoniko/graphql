@@ -53,8 +53,17 @@ function driveFolderId(url) {
 function textureSources(p) {
   if (p.startsWith('data:')) return [p];
   const id = driveFileId(p);
-  if (id) return [`https://lh3.googleusercontent.com/d/${id}=w1600`, `https://drive.google.com/thumbnail?id=${id}&sz=w1600`];
-  return [p];
+  // wsrv.nl is a free image proxy that always sends CORS headers — the fallback when Google's own hosts don't
+  const proxy = (u) => `https://wsrv.nl/?url=${encodeURIComponent(u)}&w=1600&output=jpg`;
+  if (id) {
+    return [
+      `https://lh3.googleusercontent.com/d/${id}=w1600`,
+      `https://drive.google.com/thumbnail?id=${id}&sz=w1600`,
+      proxy(`https://lh3.googleusercontent.com/d/${id}=w1600`),
+      proxy(`https://drive.google.com/uc?export=view&id=${id}`),
+    ];
+  }
+  return [p, proxy(p)];
 }
 function viewSource(p) {
   if (p.startsWith('data:')) return p;
@@ -89,8 +98,9 @@ function loadImage(src) {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.referrerPolicy = 'no-referrer';
-    img.onload = () => resolve(img);
-    img.onerror = reject;
+    const timer = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, 12000);
+    img.onload = () => { clearTimeout(timer); resolve(img); };
+    img.onerror = (e) => { clearTimeout(timer); reject(e); };
     img.src = src;
   });
 }
@@ -1742,7 +1752,8 @@ codeEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-join'
 //  Boot
 // ------------------------------------------------------------
 const saved = store.get('lg_photos', null);
-photos = (saved && saved.length ? saved : CFG.photos || []).filter((p) => typeof p === 'string' && p.trim());
+// photos from photos.js always hang in the gallery; links added in-game are appended after them
+photos = [...new Set([...(CFG.photos || []), ...(saved || [])])].filter((p) => typeof p === 'string' && p.trim());
 buildHall(photos);
 requestAnimationFrame(frame);
 
