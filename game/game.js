@@ -1327,45 +1327,115 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ---------- relay (MQTT over WebSocket) ----------
+// A tiny MQTT 3.1.1 client (QoS 0 only) instead of a library: plain old JavaScript, so it also runs
+// on older iPhones, and nothing else is needed for publish / subscribe.
 const RELAY_BROKERS = CFG.relayBrokers || ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://test.mosquitto.org:8081'];
-const hexOf = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+const hexOf = (buf) => Array.prototype.map.call(new Uint8Array(buf), (b) => (b < 16 ? '0' : '') + b.toString(16)).join('');
 const sha = (text) => crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-function connectBroker(url) {
+function bytesConcat(parts) {
+  let len = 0;
+  for (const p of parts) len += p.length;
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+const mqttStr = (str) => { const b = new TextEncoder().encode(str); return bytesConcat([new Uint8Array([b.length >> 8, b.length & 255]), b]); };
+function mqttPacket(header, body) {
+  const len = [];
+  let n = body.length;
+  do { let d = n % 128; n = Math.floor(n / 128); if (n > 0) d |= 128; len.push(d); } while (n > 0);
+  return bytesConcat([new Uint8Array([header].concat(len)), body]);
+}
+function mqttConnect(url, onMessage) {
   return new Promise((resolve) => {
-    let settled = false;
-    const c = mqtt.connect(url, { clientId: 'ng_' + net.id + '_' + Math.random().toString(36).slice(2, 6), clean: true, connectTimeout: 7000, reconnectPeriod: 0 });
-    const done = (ok) => {
-      if (settled) return;
-      settled = true;
-      if (!ok) try { c.end(true); } catch { /* ignore */ }
-      resolve(ok ? c : null);
+    let ws;
+    try { ws = new WebSocket(url, ['mqtt']); } catch { resolve(null); return; }
+    ws.binaryType = 'arraybuffer';
+    let acked = false, closed = false, pinger = 0, buf = new Uint8Array(0);
+    const client = {
+      connected: false,
+      onclose: null,
+      publish(topic, payload) { if (ws.readyState === 1) ws.send(mqttPacket(0x30, bytesConcat([mqttStr(topic), payload]))); },
+      subscribe(topic) { if (ws.readyState === 1) ws.send(mqttPacket(0x82, bytesConcat([new Uint8Array([0, 1]), mqttStr(topic), new Uint8Array([0])]))); },
+      end() { closed = true; client.connected = false; clearInterval(pinger); try { ws.close(); } catch { /* ignore */ } },
     };
-    c.once('connect', () => done(true));
-    c.once('error', () => done(false));
-    setTimeout(() => done(false), 8000);
+    const giveUp = setTimeout(() => { if (!acked) { closed = true; try { ws.close(); } catch { /* ignore */ } resolve(null); } }, 8000);
+    ws.onopen = () => {
+      const clientId = 'ng_' + net.id + '_' + Math.random().toString(36).slice(2, 6);
+      // protocol "MQTT", level 4, clean session, keep-alive 60 s
+      ws.send(mqttPacket(0x10, bytesConcat([mqttStr('MQTT'), new Uint8Array([4, 2, 0, 60]), mqttStr(clientId)])));
+    };
+    ws.onmessage = (e) => {
+      buf = bytesConcat([buf, new Uint8Array(e.data)]);
+      for (;;) {
+        if (buf.length < 2) break;
+        let len = 0, mul = 1, i = 1, byte;
+        do { if (i >= buf.length) return; byte = buf[i++]; len += (byte & 127) * mul; mul *= 128; } while (byte & 128);
+        if (buf.length < i + len) break;
+        const type = buf[0], body = buf.subarray(i, i + len);
+        if (type >> 4 === 2) { // CONNACK
+          clearTimeout(giveUp);
+          if (body[1] === 0) {
+            acked = true;
+            client.connected = true;
+            pinger = setInterval(() => { if (ws.readyState === 1) ws.send(new Uint8Array([0xc0, 0])); }, 30000);
+            resolve(client);
+          } else { closed = true; ws.close(); resolve(null); }
+        } else if (type >> 4 === 3) { // PUBLISH
+          const tl = (body[0] << 8) | body[1];
+          onMessage(body.slice(2 + tl + ((type >> 1) & 3 ? 2 : 0)));
+        }
+        buf = buf.slice(i + len);
+      }
+    };
+    const down = () => {
+      const was = client.connected;
+      client.connected = false;
+      clearInterval(pinger);
+      if (!acked) { clearTimeout(giveUp); resolve(null); return; }
+      if (was && !closed && client.onclose) client.onclose();
+      closed = true;
+    };
+    ws.onclose = down;
+    ws.onerror = down;
   });
 }
 async function relayOpen(code) {
-  if (typeof mqtt === 'undefined' || !window.crypto || !crypto.subtle) return null;
+  if (!window.WebSocket || !window.crypto || !crypto.subtle || !window.TextEncoder) return null;
   const key = await crypto.subtle.importKey('raw', await sha('nasha-galereya|key|' + code), 'AES-GCM', false, ['encrypt', 'decrypt']);
   const topic = 'nasha-galereya/v1/' + hexOf(await sha('nasha-galereya|topic|' + code)).slice(0, 32);
   for (const url of RELAY_BROKERS) {
     if (net.code !== code) return null;
-    const client = await connectBroker(url);
+    const relay = { client: null, key, topic, url, partner: null, chain: Promise.resolve() };
+    const onMessage = (payload) => relayReceive(relay, payload);
+    const client = await mqttConnect(url, onMessage);
     if (!client) continue;
-    if (net.code !== code) { client.end(true); return null; }
-    client.options.reconnectPeriod = 2000; // from now on keep the link alive
-    const relay = { client, key, topic, url, partner: null, chain: Promise.resolve() };
-    client.subscribe(topic, { qos: 0 });
-    client.on('message', (t, payload) => relayReceive(relay, payload));
+    if (net.code !== code) { client.end(); return null; }
+    const attach = (c) => {
+      relay.client = c;
+      c.subscribe(topic);
+      // keep the link alive: reconnect to the same broker if it drops
+      c.onclose = () => {
+        const retry = async () => {
+          if (net.relay !== relay) return;
+          const again = await mqttConnect(url, onMessage);
+          if (again && net.relay === relay) attach(again);
+          else if (net.relay === relay) setTimeout(retry, 3000);
+        };
+        setTimeout(retry, 1500);
+      };
+    };
+    attach(client);
     net.relay = relay;
     return relay;
   }
   return null;
 }
 function relayClose() {
-  if (net.relay) try { net.relay.client.end(true); } catch { /* ignore */ }
+  const r = net.relay;
   net.relay = null;
+  if (r && r.client) try { r.client.end(); } catch { /* ignore */ }
 }
 let warnedBigPhotos = false;
 function relaySend(msg, to) {
@@ -1379,12 +1449,12 @@ function relaySend(msg, to) {
   const body = new TextEncoder().encode(JSON.stringify({ f: net.id, to: to || r.partner || undefined, m: msg }));
   // keep messages in order: encrypt + publish one after another
   r.chain = r.chain.then(async () => {
-    if (!r.client.connected) return;
+    if (!r.client || !r.client.connected) return;
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, r.key, body));
     const out = new Uint8Array(12 + ct.length);
     out.set(iv); out.set(ct, 12);
-    r.client.publish(r.topic, out, { qos: 0 });
+    r.client.publish(r.topic, out);
   }).catch(() => {});
 }
 async function relayReceive(r, payload) {
@@ -1534,7 +1604,7 @@ function joinRoom(code, onError) {
   setTimeout(() => {
     if (net.connected || net.code !== code) return;
     if (!net.relay && lastErr === 'peer-unavailable') onError('Комната «' + code + '» не найдена 🙏 Проверьте код');
-    else onError('Не получается соединиться 😢 Проверьте код и интернет у обоих, и что комната ещё открыта');
+    else onError(`Не получается соединиться с комнатой ${code} 😢 Проверьте код и что у партнёра открыта игра с этой комнатой. (сервер: ${net.relay ? 'есть связь' : 'нет связи'}${lastErr ? ', прямая: ' + lastErr : ''})`);
   }, 60000);
 }
 
@@ -1561,8 +1631,9 @@ window.addEventListener('pagehide', () => {
 //  Voice: 🎤 walkie-talkie messages (work over any link, relay included)
 //  and 📞 a live call (WebRTC media, needs the phones to reach each other)
 // ------------------------------------------------------------
-const voice = { stream: null, rec: null, chunks: [], recStart: 0, recTimer: 0, call: null, pendingCall: null, remoteAudio: null, playing: 0 };
+const voice = { stream: null, rec: null, recStart: 0, recTimer: 0, call: null, pendingCall: null, remoteAudio: null, playing: 0, queue: [] };
 const PTT_MAX = 20;
+const VOICE_SR = 11025; // speech is fine at 11 kHz and stays small enough for the relay
 let pttHeld = false;
 const canVoice = () => !!(state.started && state.partner && !state.partnerIsNpc && net.connected);
 async function getMic() {
@@ -1572,27 +1643,94 @@ async function getMic() {
   return voice.stream;
 }
 function micError(e) {
-  toast(e && e.name === 'NotAllowedError' ? '🎤 Разрешите доступ к микрофону в браузере' : '🎤 Микрофон недоступен на этом устройстве', 4000);
+  toast(e && e.name === 'NotAllowedError' ? '🎤 Разрешите доступ к микрофону в настройках браузера' : '🎤 Микрофон недоступен на этом устройстве', 4000);
 }
 function releaseMic() {
   if (voice.stream && !voice.call && !voice.rec) { voice.stream.getTracks().forEach((t) => t.stop()); voice.stream = null; }
 }
 const duckFilm = (on) => { if (filmMedia.video) filmMedia.video.volume = on ? 0.3 : 1; };
 
+// ---- voice format: 11 kHz mono IMA ADPCM, decoded by our own code and played as WAV.
+// iPhone and Android record different formats with MediaRecorder and can't always play each
+// other's; this one plays everywhere.
+const IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767];
+const IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
+function imaStep(st, code) {
+  const step = IMA_STEP[st.idx];
+  let diff = step >> 3;
+  if (code & 4) diff += step;
+  if (code & 2) diff += step >> 1;
+  if (code & 1) diff += step >> 2;
+  st.pred = clamp(st.pred + (code & 8 ? -diff : diff), -32768, 32767);
+  st.idx = clamp(st.idx + IMA_INDEX[code], 0, 88);
+}
+function adpcmEncode(pcm) {
+  const out = new Uint8Array(Math.ceil(pcm.length / 2));
+  const st = { pred: 0, idx: 0 };
+  for (let i = 0; i < pcm.length; i++) {
+    const step = IMA_STEP[st.idx];
+    let diff = pcm[i] - st.pred, code = 0;
+    if (diff < 0) { code = 8; diff = -diff; }
+    if (diff >= step) { code |= 4; diff -= step; }
+    if (diff >= step >> 1) { code |= 2; diff -= step >> 1; }
+    if (diff >= step >> 2) code |= 1;
+    imaStep(st, code);
+    if (i & 1) out[i >> 1] |= code << 4; else out[i >> 1] = code;
+  }
+  return out;
+}
+function adpcmDecode(bytes, n) {
+  const pcm = new Int16Array(n);
+  const st = { pred: 0, idx: 0 };
+  for (let i = 0; i < n; i++) {
+    imaStep(st, i & 1 ? bytes[i >> 1] >> 4 : bytes[i >> 1] & 15);
+    pcm[i] = st.pred;
+  }
+  return pcm;
+}
+function makeWav(pcm, rate) {
+  const b = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+  const w = (o, txt) => { for (let i = 0; i < txt.length; i++) b.setUint8(o + i, txt.charCodeAt(i)); };
+  w(0, 'RIFF'); b.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+  b.setUint32(24, rate, true); b.setUint32(28, rate * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true);
+  w(36, 'data'); b.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) b.setInt16(44 + i * 2, pcm[i], true);
+  return new Blob([b.buffer], { type: 'audio/wav' });
+}
+function bytesToB64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function b64ToBytes(b64) {
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+
+// ---- recording through Web Audio (works the same on iPhone and Android)
 async function pttStart() {
   if (voice.rec || !canVoice()) return;
-  if (typeof MediaRecorder === 'undefined') { toast('🎤 Этот браузер не умеет записывать голос'); return; }
+  ensureAudio();
+  const ctx = audio.ctx;
+  if (!ctx || !ctx.createScriptProcessor) { toast('🎤 Этот браузер не умеет записывать голос'); return; }
   let stream;
   try { stream = await getMic(); } catch (e) { micError(e); return; }
   if (!pttHeld || voice.rec) { releaseMic(); return; } // let go before the mic was ready
-  const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
-  const rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 24000 } : { audioBitsPerSecond: 24000 });
-  voice.rec = rec;
-  voice.chunks = [];
+  if (ctx.state === 'suspended') ctx.resume();
+  const src = ctx.createMediaStreamSource(stream);
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  const silent = ctx.createGain();
+  silent.gain.value = 0;
+  const chunks = [];
+  proc.onaudioprocess = (e) => { chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+  src.connect(proc);
+  proc.connect(silent);
+  silent.connect(ctx.destination);
+  voice.rec = { src, proc, silent, chunks, rate: ctx.sampleRate };
   voice.recStart = now();
-  rec.ondataavailable = (e) => { if (e.data && e.data.size) voice.chunks.push(e.data); };
-  rec.onstop = () => pttSend(rec.mimeType || mime);
-  rec.start();
   $('#ptt').classList.add('rec');
   duckFilm(true);
   voice.recTimer = setInterval(() => {
@@ -1605,23 +1743,43 @@ function pttStop() {
   pttHeld = false;
   if (!voice.rec) return;
   clearInterval(voice.recTimer);
-  const rec = voice.rec;
+  const r = voice.rec;
   voice.rec = null;
-  try { rec.stop(); } catch { /* already stopped */ }
+  r.proc.onaudioprocess = null;
+  try { r.src.disconnect(); r.proc.disconnect(); r.silent.disconnect(); } catch { /* ignore */ }
   $('#ptt').classList.remove('rec');
   $('#ptt small').textContent = 'Рация';
   if (!voice.playing) duckFilm(false);
+  pttSend(r);
 }
-async function pttSend(mime) {
+function pttSend(r) {
   const dur = now() - voice.recStart;
-  const blob = new Blob(voice.chunks, { type: mime || 'audio/webm' });
-  voice.chunks = [];
   releaseMic();
-  if (dur < 0.5 || blob.size < 400) { toast('🎤 Держите кнопку, пока говорите'); return; }
-  const data = await new Promise((resolve) => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.readAsDataURL(blob); });
-  net.send({ t: 'voice', data, d: +dur.toFixed(1) });
+  let total = 0;
+  for (const c of r.chunks) total += c.length;
+  if (dur < 0.5 || total < r.rate * 0.3) { toast('🎤 Держите кнопку, пока говорите'); return; }
+  const all = new Float32Array(total);
+  let o = 0;
+  for (const c of r.chunks) { all.set(c, o); o += c.length; }
+  // downsample to 11 kHz (box filter) and lift quiet recordings
+  const ratio = r.rate / VOICE_SR;
+  const n = Math.floor(total / ratio);
+  const mono = new Float32Array(n);
+  let peak = 0;
+  for (let i = 0; i < n; i++) {
+    const a = Math.floor(i * ratio), b = Math.max(a + 1, Math.floor((i + 1) * ratio));
+    let sum = 0;
+    for (let j = a; j < b && j < total; j++) sum += all[j];
+    mono[i] = sum / (b - a);
+    peak = Math.max(peak, Math.abs(mono[i]));
+  }
+  const gain = peak > 0.01 ? Math.min(4, 0.9 / peak) : 1;
+  const pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) pcm[i] = clamp(Math.round(mono[i] * gain * 32767), -32768, 32767);
+  net.send({ t: 'voice', f: 'adpcm', sr: VOICE_SR, n, d: +dur.toFixed(1), data: bytesToB64(adpcmEncode(pcm)) });
   toast(`🎤 Голосовое отправлено (${Math.round(dur)} с)`, 1600);
 }
+
 let micTex = null;
 function showSpeaking(on) {
   const pt = state.partner;
@@ -1639,36 +1797,65 @@ function showSpeaking(on) {
   }
   pt.micSprite.visible = on;
 }
-async function playVoice(m) {
-  if (typeof m.data !== 'string' || !m.data.startsWith('data:audio')) return;
-  voice.playing++;
-  duckFilm(true);
-  showSpeaking(true);
-  toast(`🎤 ${(state.partner && state.partner.name) || 'Партнёр'} говорит…`, Math.max(1800, (m.d || 2) * 1000));
-  const done = () => {
-    voice.playing = Math.max(0, voice.playing - 1);
-    if (voice.playing) return;
+
+// ---- playback: one <audio> element unlocked by the first tap (iPhone only lets an element play
+// later if it was started by a tap once), with Web Audio as the fallback
+const voicePlayer = new Audio();
+voicePlayer.setAttribute('playsinline', '');
+let voiceUnlocked = false;
+document.addEventListener('pointerdown', () => {
+  if (voiceUnlocked) return;
+  voiceUnlocked = true;
+  voicePlayer.src = URL.createObjectURL(makeWav(new Int16Array(800), 8000));
+  voicePlayer.play().catch(() => { voiceUnlocked = false; });
+}, true);
+function playVoice(m) {
+  if (m.f !== 'adpcm' || typeof m.data !== 'string') return;
+  let pcm;
+  try {
+    const bytes = b64ToBytes(m.data);
+    pcm = adpcmDecode(bytes, Math.min(m.n | 0, bytes.length * 2));
+  } catch { return; }
+  const sr = clamp(m.sr | 0 || VOICE_SR, 3000, 48000);
+  voice.queue.push({ pcm, sr, d: m.d });
+  if (!voice.playing) playNextVoice();
+}
+function playNextVoice() {
+  const item = voice.queue.shift();
+  if (!item) {
+    voice.playing = 0;
     showSpeaking(false);
     if (!voice.rec) duckFilm(false);
-  };
-  try {
-    // the Web Audio context is already unlocked by taps, so phones play it without another tap
-    ensureAudio();
-    const buf = await (await fetch(m.data)).arrayBuffer();
-    const ab = await audio.ctx.decodeAudioData(buf);
-    const src = audio.ctx.createBufferSource();
-    src.buffer = ab;
-    const g = audio.ctx.createGain();
-    g.gain.value = 1.4;
-    src.connect(g).connect(audio.ctx.destination);
-    src.onended = done;
-    src.start();
-  } catch {
-    const a = new Audio(m.data);
-    a.onended = done;
-    a.onerror = done;
-    a.play().catch(() => { done(); toast('🎤 Нажмите на экран, чтобы слышать голосовые'); });
+    return;
   }
+  voice.playing = 1;
+  duckFilm(true);
+  showSpeaking(true);
+  toast(`🎤 ${(state.partner && state.partner.name) || 'Партнёр'} говорит…`, Math.max(1800, (item.d || 2) * 1000));
+  const url = URL.createObjectURL(makeWav(item.pcm, item.sr));
+  let finished = false;
+  const next = () => { if (finished) return; finished = true; URL.revokeObjectURL(url); playNextVoice(); };
+  voicePlayer.onended = next;
+  voicePlayer.onerror = next;
+  voicePlayer.src = url;
+  voicePlayer.play().catch(() => {
+    voicePlayer.onended = null;
+    voicePlayer.onerror = null;
+    try {
+      ensureAudio();
+      const buf = audio.ctx.createBuffer(1, item.pcm.length, item.sr);
+      const ch = buf.getChannelData(0);
+      for (let i = 0; i < item.pcm.length; i++) ch[i] = item.pcm[i] / 32768;
+      const srcNode = audio.ctx.createBufferSource();
+      srcNode.buffer = buf;
+      srcNode.connect(audio.ctx.destination);
+      srcNode.onended = next;
+      srcNode.start();
+    } catch {
+      toast('🎤 Нажмите на экран, чтобы слышать голосовые');
+      next();
+    }
+  });
 }
 
 function wirePeerCalls(peer) {
@@ -1979,7 +2166,17 @@ const nameEl = $('#name');
 nameEl.value = state.myName;
 const codeEl = $('#code');
 const urlRoom = new URLSearchParams(location.search).get('room');
-if (urlRoom) codeEl.value = urlRoom.toUpperCase();
+// A Russian keyboard types Cyrillic letters that look exactly like the Latin ones in the code
+// (Р/P, С/C, А/A …), which makes it a different room. Turn them into Latin and drop anything else.
+const CYR_TO_LAT = { А: 'A', В: 'B', С: 'C', Е: 'E', Н: 'H', К: 'K', М: 'M', О: 'O', Р: 'P', Т: 'T', Х: 'X', У: 'Y', З: '3' };
+function normalizeCode(text) {
+  return String(text || '').toUpperCase().replace(/[А-ЯЁ]/g, (ch) => CYR_TO_LAT[ch] || '').replace(/[^A-Z0-9]/g, '').slice(0, 6);
+}
+codeEl.addEventListener('input', () => {
+  const v = normalizeCode(codeEl.value);
+  if (v !== codeEl.value) codeEl.value = v;
+});
+if (urlRoom) codeEl.value = normalizeCode(urlRoom);
 
 function menuStatus(text, error = false) {
   const el = $('#menu-status');
@@ -2038,7 +2235,8 @@ $('#btn-host').addEventListener('click', () => {
 });
 $('#btn-join').addEventListener('click', () => {
   ensureAudio(); readName();
-  const code = codeEl.value.trim().toUpperCase();
+  const code = normalizeCode(codeEl.value);
+  codeEl.value = code;
   if (code.length < 4) { menuStatus('Введите код комнаты', true); return; }
   setMenuBusy(true);
   menuStatus('Подключаемся…');
@@ -2058,7 +2256,7 @@ $('#btn-join').addEventListener('click', () => {
     if (done) { clearInterval(wait); return; }
     if (net.connected) { done = true; clearInterval(wait); setMenuBusy(false); menuStatus(''); startGame('guest'); return; }
     const sec = Math.floor(now() - t0);
-    if (sec >= 5) menuStatus(`Подключаемся… ${sec} с${sec >= 8 ? ' (пробуем через сервер)' : ''}`);
+    if (sec >= 3) menuStatus(`Подключаемся к ${code}… ${sec} с · сервер ${net.relay ? '✓' : '…'}${sec >= 8 ? ' · ищем партнёра через сервер' : ''}`);
   }, 250);
 });
 codeEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-join').click(); });
