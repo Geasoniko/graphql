@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import {
   $, clamp, damp, angDamp, wrapAngle, opposite, now, fmt, store, toast, TEX,
-  driveFileId, driveFolderId, viewSource,
+  driveFileId, driveFolderId, viewSource, canvasTexture,
 } from './util.js';
 import { ITEMS, SHOP_TABS, START_COINS, newItem, itemLabel, gripOf } from './items.js';
 import { makeCharacter, removeCharacter, setAnim, setOutfit, setHeld, animateCharacter } from './characters.js';
@@ -937,9 +937,13 @@ window.addEventListener('keydown', (e) => {
   if (map[e.code] && !e.repeat) doEmote(map[e.code]);
   if (e.code === 'KeyE' && !e.repeat && currentActions.length) currentActions[0].fn();
   if (e.code === 'KeyI' && !e.repeat) openInv();
+  if (e.code === 'KeyV' && !e.repeat && canVoice()) { ensureAudio(); pttHeld = true; pttStart(); } // hold V to talk
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
-window.addEventListener('keyup', (e) => keys.delete(e.code));
+window.addEventListener('keyup', (e) => {
+  keys.delete(e.code);
+  if (e.code === 'KeyV') pttStop();
+});
 window.addEventListener('blur', () => keys.clear());
 
 function getInput() {
@@ -1262,6 +1266,7 @@ function frame() {
       slowTick = 0.25;
       world.loadNear(state.me.root.position.x, state.me.root.position.z);
       computeActions();
+      updateVoiceUi();
       updatePlace();
       updateEmoteButtons();
     }
@@ -1417,7 +1422,7 @@ function linkUp(via) {
   net.via = via;
   net.connected = true;
   net.lastRecv = now();
-  net.send({ t: 'hello', k: state.myKind, n: state.myName });
+  net.send({ t: 'hello', k: state.myKind, n: state.myName, pid: net.peer && !net.peer.destroyed ? net.peer.id : null });
   if (state.mode === 'host') net.send({ t: 'p', list: photos });
   for (const [film, set] of Object.entries(state.takenSeats)) net.send({ t: 'seats', film: +film, list: [...set] });
   updateRoomInfo();
@@ -1486,6 +1491,7 @@ function hostRoom(onReady, onError, attempt = 0) {
     peer.on('error', (e) => {
       if (e.type === 'unavailable-id' && attempt < 3 && !ready) { peer.destroy(); relayClose(); hostRoom(onReady, onError, attempt + 1); }
     });
+    wirePeerCalls(peer);
   }
   setTimeout(() => { if (!ready && net.code === code) onError('Нет связи с сервером. Проверьте интернет 🙏'); }, 16000);
 }
@@ -1511,6 +1517,7 @@ function joinRoom(code, onError) {
     };
     peer.on('open', attempt);
     peer.on('error', (e) => { lastErr = e.type; });
+    wirePeerCalls(peer);
   }
   // 2) relay: start knocking if the direct link hasn't come up in a few seconds
   relayOpen(code).then((r) => {
@@ -1550,18 +1557,229 @@ window.addEventListener('pagehide', () => {
   if (net.conn) try { net.conn.close(); } catch { /* ignore */ }
 });
 
+// ------------------------------------------------------------
+//  Voice: 🎤 walkie-talkie messages (work over any link, relay included)
+//  and 📞 a live call (WebRTC media, needs the phones to reach each other)
+// ------------------------------------------------------------
+const voice = { stream: null, rec: null, chunks: [], recStart: 0, recTimer: 0, call: null, pendingCall: null, remoteAudio: null, playing: 0 };
+const PTT_MAX = 20;
+let pttHeld = false;
+const canVoice = () => !!(state.started && state.partner && !state.partnerIsNpc && net.connected);
+async function getMic() {
+  if (voice.stream && voice.stream.getAudioTracks().some((t) => t.readyState === 'live')) return voice.stream;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nomic');
+  voice.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  return voice.stream;
+}
+function micError(e) {
+  toast(e && e.name === 'NotAllowedError' ? '🎤 Разрешите доступ к микрофону в браузере' : '🎤 Микрофон недоступен на этом устройстве', 4000);
+}
+function releaseMic() {
+  if (voice.stream && !voice.call && !voice.rec) { voice.stream.getTracks().forEach((t) => t.stop()); voice.stream = null; }
+}
+const duckFilm = (on) => { if (filmMedia.video) filmMedia.video.volume = on ? 0.3 : 1; };
+
+async function pttStart() {
+  if (voice.rec || !canVoice()) return;
+  if (typeof MediaRecorder === 'undefined') { toast('🎤 Этот браузер не умеет записывать голос'); return; }
+  let stream;
+  try { stream = await getMic(); } catch (e) { micError(e); return; }
+  if (!pttHeld || voice.rec) { releaseMic(); return; } // let go before the mic was ready
+  const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 24000 } : { audioBitsPerSecond: 24000 });
+  voice.rec = rec;
+  voice.chunks = [];
+  voice.recStart = now();
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) voice.chunks.push(e.data); };
+  rec.onstop = () => pttSend(rec.mimeType || mime);
+  rec.start();
+  $('#ptt').classList.add('rec');
+  duckFilm(true);
+  voice.recTimer = setInterval(() => {
+    const sec = Math.floor(now() - voice.recStart);
+    $('#ptt small').textContent = `● ${sec} с`;
+    if (sec >= PTT_MAX) pttStop();
+  }, 250);
+}
+function pttStop() {
+  pttHeld = false;
+  if (!voice.rec) return;
+  clearInterval(voice.recTimer);
+  const rec = voice.rec;
+  voice.rec = null;
+  try { rec.stop(); } catch { /* already stopped */ }
+  $('#ptt').classList.remove('rec');
+  $('#ptt small').textContent = 'Рация';
+  if (!voice.playing) duckFilm(false);
+}
+async function pttSend(mime) {
+  const dur = now() - voice.recStart;
+  const blob = new Blob(voice.chunks, { type: mime || 'audio/webm' });
+  voice.chunks = [];
+  releaseMic();
+  if (dur < 0.5 || blob.size < 400) { toast('🎤 Держите кнопку, пока говорите'); return; }
+  const data = await new Promise((resolve) => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.readAsDataURL(blob); });
+  net.send({ t: 'voice', data, d: +dur.toFixed(1) });
+  toast(`🎤 Голосовое отправлено (${Math.round(dur)} с)`, 1600);
+}
+let micTex = null;
+function showSpeaking(on) {
+  const pt = state.partner;
+  if (!pt) return;
+  if (!pt.micSprite) {
+    micTex = micTex || canvasTexture(128, 128, (ctx) => {
+      ctx.fillStyle = '#ff5c9a'; ctx.beginPath(); ctx.arc(64, 64, 56, 0, Math.PI * 2); ctx.fill();
+      ctx.font = '64px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🎤', 64, 70);
+    });
+    pt.micSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: micTex, depthTest: false, transparent: true }));
+    pt.micSprite.scale.set(0.32, 0.32, 1);
+    pt.micSprite.position.y = pt.kind === 'girl' ? 2.2 : 2.3;
+    pt.micSprite.renderOrder = 11;
+    pt.root.add(pt.micSprite);
+  }
+  pt.micSprite.visible = on;
+}
+async function playVoice(m) {
+  if (typeof m.data !== 'string' || !m.data.startsWith('data:audio')) return;
+  voice.playing++;
+  duckFilm(true);
+  showSpeaking(true);
+  toast(`🎤 ${(state.partner && state.partner.name) || 'Партнёр'} говорит…`, Math.max(1800, (m.d || 2) * 1000));
+  const done = () => {
+    voice.playing = Math.max(0, voice.playing - 1);
+    if (voice.playing) return;
+    showSpeaking(false);
+    if (!voice.rec) duckFilm(false);
+  };
+  try {
+    // the Web Audio context is already unlocked by taps, so phones play it without another tap
+    ensureAudio();
+    const buf = await (await fetch(m.data)).arrayBuffer();
+    const ab = await audio.ctx.decodeAudioData(buf);
+    const src = audio.ctx.createBufferSource();
+    src.buffer = ab;
+    const g = audio.ctx.createGain();
+    g.gain.value = 1.4;
+    src.connect(g).connect(audio.ctx.destination);
+    src.onended = done;
+    src.start();
+  } catch {
+    const a = new Audio(m.data);
+    a.onended = done;
+    a.onerror = done;
+    a.play().catch(() => { done(); toast('🎤 Нажмите на экран, чтобы слышать голосовые'); });
+  }
+}
+
+function wirePeerCalls(peer) {
+  peer.on('call', (call) => {
+    if (voice.call || !state.started) { try { call.close(); } catch { /* ignore */ } return; }
+    voice.pendingCall = call;
+    renderCallBtn();
+    toast('📞 Партнёр звонит — нажмите 📞 вверху, чтобы ответить', 6000);
+    call.on('close', () => { if (voice.pendingCall === call) { voice.pendingCall = null; renderCallBtn(); } });
+  });
+}
+async function toggleCall() {
+  if (voice.call) { endCall(true); toast('📞 Звонок завершён'); return; }
+  if (!canVoice()) return;
+  let stream;
+  try { stream = await getMic(); } catch (e) { micError(e); return; }
+  if (voice.pendingCall) {
+    const c = voice.pendingCall;
+    voice.pendingCall = null;
+    c.answer(stream);
+    attachCall(c);
+    return;
+  }
+  const pid = state.partnerPid;
+  if (!net.peer || net.peer.destroyed || net.peer.disconnected || !pid) {
+    releaseMic();
+    toast('📞 Живой звонок сейчас недоступен — используйте 🎤 рацию', 4500);
+    return;
+  }
+  const c = net.peer.call(pid, stream);
+  if (!c) { releaseMic(); toast('📞 Не удалось позвонить — используйте 🎤 рацию', 4500); return; }
+  attachCall(c);
+  toast('📞 Звоним… партнёр должен нажать 📞', 4000);
+  setTimeout(() => {
+    if (voice.call === c && !voice.remoteAudio) { endCall(true); toast('📞 Звонок не соединился 😢 Используйте 🎤 рацию — она работает всегда', 5000); }
+  }, 25000);
+}
+function attachCall(c) {
+  voice.call = c;
+  renderCallBtn();
+  c.on('stream', (remote) => {
+    if (voice.call !== c) return;
+    if (!voice.remoteAudio) { voice.remoteAudio = new Audio(); voice.remoteAudio.autoplay = true; }
+    voice.remoteAudio.srcObject = remote;
+    voice.remoteAudio.play().catch(() => toast('📞 Нажмите на экран, чтобы слышать партнёра'));
+    toast('📞 Вы на связи 💕 В наушниках не будет эха', 3500);
+    renderCallBtn();
+  });
+  c.on('close', () => { if (voice.call === c) { endCall(false); toast('📞 Звонок завершён'); } });
+  c.on('error', () => { if (voice.call === c) { endCall(false); toast('📞 Звонок прервался — можно позвонить ещё раз или говорить по 🎤 рации', 4000); } });
+}
+function endCall(notify) {
+  const c = voice.call;
+  voice.call = null;
+  if (c) try { c.close(); } catch { /* ignore */ }
+  if (voice.remoteAudio) { voice.remoteAudio.srcObject = null; voice.remoteAudio = null; }
+  releaseMic();
+  if (notify) net.send({ t: 'call-end' });
+  renderCallBtn();
+}
+function renderCallBtn() {
+  const b = $('#btn-call');
+  b.classList.toggle('on', !!voice.call);
+  b.classList.toggle('ring', !!voice.pendingCall && !voice.call);
+  b.textContent = voice.call ? '📵' : '📞';
+  b.title = voice.call ? 'Завершить звонок' : 'Голосовой звонок';
+}
+function updateVoiceUi() {
+  const ok = canVoice();
+  $('#ptt').hidden = !ok;
+  $('#btn-call').hidden = !ok;
+  if (!ok) {
+    if (voice.call) endCall(false);
+    if (voice.rec) pttStop();
+  }
+}
+const pttBtn = $('#ptt');
+pttBtn.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  ensureAudio();
+  pttHeld = true;
+  try { pttBtn.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+  pttStart();
+});
+pttBtn.addEventListener('pointerup', pttStop);
+pttBtn.addEventListener('pointercancel', pttStop);
+pttBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+$('#btn-call').addEventListener('click', () => { ensureAudio(); toggleCall(); });
+// phones may block sound that starts without a tap; the next tap anywhere resumes the call audio
+document.addEventListener('pointerdown', () => { if (voice.remoteAudio && voice.remoteAudio.paused) voice.remoteAudio.play().catch(() => {}); });
+
 function onNetData(m) {
   if (!m || typeof m !== 'object') return;
   switch (m.t) {
+    case 'voice':
+      if (state.partner) playVoice(m);
+      break;
+    case 'call-end':
+      if (voice.call) { endCall(false); toast('📞 Партнёр завершил звонок'); }
+      if (voice.pendingCall) { voice.pendingCall = null; renderCallBtn(); }
+      break;
     case 'hello': {
       let kind = m.k === 'boy' ? 'boy' : 'girl';
       if (kind === state.myKind) {
         if (state.mode === 'guest') {
           state.myKind = opposite(state.myKind);
           if (state.started) { createMe(); toast('Этот персонаж уже занят — вы играете за ' + (state.myKind === 'girl' ? 'девушку 👧' : 'парня 👦')); }
-          net.send({ t: 'hello', k: state.myKind, n: state.myName });
+          net.send({ t: 'hello', k: state.myKind, n: state.myName, pid: net.peer && !net.peer.destroyed ? net.peer.id : null });
         } else kind = opposite(state.myKind);
       }
+      state.partnerPid = typeof m.pid === 'string' ? m.pid : null;
       if (state.started) {
         createPartner(kind, String(m.n || '').slice(0, 16), false);
         toast((kind === 'girl' ? '👧 ' : '👦 ') + (m.n || 'Партнёр') + ' пришёл 💕');
@@ -1860,4 +2078,4 @@ if (CFG.driveFolder && driveFolderId(CFG.driveFolder)) {
 }
 
 // for debugging in the console
-window.__game = { state, net, setPhotos, doEmote, startGame, buy, sitCinema, openShop, openInv, openKassa, filmMedia, get world() { return world; } };
+window.__game = { state, net, setPhotos, doEmote, startGame, buy, sitCinema, openShop, openInv, openKassa, filmMedia, voice, get world() { return world; } };

@@ -45,6 +45,7 @@
       <div id="place" class="chip"></div>
     </div>
     <div class="top-btns">
+      <button id="btn-call" class="icon-btn" title="Голосовой звонок" hidden>📞</button>
       <button id="btn-inv" class="icon-btn" title="Мои вещи">🎒</button>
       <button id="btn-photos" class="icon-btn" title="Фото">🖼️</button>
       <button id="btn-sound" class="icon-btn" title="Звук">🔊</button>
@@ -133,6 +134,8 @@
 
 <!-- ============ КИНО ============ -->
 <div id="countdown" hidden></div>
+<!-- walkie-talkie lives outside the HUD so it stays above the film -->
+<button id="ptt" hidden title="Держите и говорите (на ноутбуке — клавиша V)"><span>🎤</span><small>Рация</small></button>
 <div id="film-proj"></div>
 <div id="film" hidden>
   <div id="film-body"></div>
@@ -183,6 +186,7 @@
           <li>Мышь (зажать) — камера, колесо — зум</li>
           <li><kbd>1</kbd>–<kbd>7</kbd> — эмоции, <kbd>E</kbd> — действие рядом</li>
           <li><kbd>I</kbd> — мои вещи</li>
+          <li>Держать <kbd>V</kbd> — 🎤 голосовое</li>
         </ul>
       </div>
       <div><b>📱 Телефон</b>
@@ -199,6 +203,7 @@
       <li>🎟️ Касса и 🍿 попкорн справа, дверь в 🎬 кинотеатр между ними</li>
       <li>🎁 Покупки попадают вам в 🎒 — оттуда можно подарить партнёру, положить в сумку, взять в руку</li>
       <li>💞 Вальс и 💋 поцелуй — подойдите к партнёру. 🪑 — сесть на скамейку или диван</li>
+      <li>🎤 Рация справа: держите, говорите, отпустите — партнёр услышит. 📞 вверху — живой звонок (лучше в наушниках)</li>
     </ul>
   </div>
 </div>
