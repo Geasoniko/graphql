@@ -541,3 +541,17 @@ kbd {
 #film.full #film-bar { top: auto; bottom: 0; background: rgba(0, 0, 0, 0.6); }
 .film-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 10px; }
 .film-empty p { margin: 0; }
+
+/* film on the 3D screen: the #film box is just a transparent click area + control bar */
+#film.tex { background: transparent; box-shadow: none; }
+#film.tex #film-body { cursor: pointer; background: transparent; }
+#film .tex-only { display: none; align-items: center; gap: 6px; }
+#film.tex .tex-only { display: inline-flex; }
+#film-seek { width: min(32vw, 260px); accent-color: var(--pink); }
+#film-time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#film-bar { background: rgba(10, 6, 12, 0.6); border-radius: 12px; }
+.film-video { position: fixed; left: 0; top: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; }
+#film-body .film-video { position: static; width: 100%; height: 100%; opacity: 1; pointer-events: auto; }
+.film-video:fullscreen { opacity: 1; width: 100%; height: 100%; }
+body.touch.watching #emotes { display: none; }
+body.touch.watching #actions { right: 12px; left: 150px; bottom: calc(14px + env(safe-area-inset-bottom)); flex-direction: column-reverse; align-items: stretch; }

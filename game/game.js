@@ -500,9 +500,39 @@ function updateMovie(dt) {
       playFilm(mv.film);
     }
   }
-  if (mv.phase === 'play') positionFilm();
+  if (mv.phase === 'play') {
+    positionFilm();
+    // the hidden <video> may not report new frames on its own, so push them to the screen every frame
+    const v = filmMedia.video;
+    if (filmMedia.tex && v && v.readyState >= 2) filmMedia.tex.needsUpdate = true;
+  }
 }
-// url in photos.js can be one link or a list of links tried in order
+// The film is drawn right on the 3D cinema screen (VideoTexture). That needs the video to be
+// same-origin or CORS-enabled; if the browser refuses, the player sits exactly over the screen instead.
+const vidSync = { until: 0, p: 0, ct: 0 };
+const filmMedia = { video: null, tex: null, mode: null };
+const fmtTime = (t) => { t = Math.max(0, Math.floor(t || 0)); const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0'); };
+const sameOrigin = (u) => { try { return u.startsWith('blob:') || new URL(u, location.href).origin === location.origin; } catch { return false; } };
+function canTexture(v) {
+  try {
+    const c = document.createElement('canvas'); c.width = c.height = 2;
+    const x = c.getContext('2d'); x.drawImage(v, 0, 0, 2, 2); x.getImageData(0, 0, 1, 1);
+    return true;
+  } catch { return false; }
+}
+function setFilmMode(mode) {
+  filmMedia.mode = mode;
+  const el = $('#film');
+  el.classList.toggle('tex', mode === 'texture');
+  el.classList.toggle('boxed', mode !== 'texture');
+}
+function clearFilmMedia() {
+  const { video, tex } = filmMedia;
+  if (video) { video.pause(); video.removeAttribute('src'); video.load(); video.remove(); }
+  if (tex) tex.dispose();
+  filmMedia.video = null; filmMedia.tex = null; filmMedia.mode = null;
+  $('#film-body').innerHTML = '';
+}
 function filmSources(film) {
   const m = MOVIES[film] || {};
   if (state.localFilms[film]) return [state.localFilms[film]];
@@ -510,6 +540,9 @@ function filmSources(film) {
 }
 function filmPicker(film, text) {
   const m = MOVIES[film] || {};
+  clearFilmMedia();
+  setFilmMode('picker');
+  if (world) world.cinema.setScreenText(' ', '#000000');
   const body = $('#film-body');
   body.innerHTML = `<div class="film-empty"><p>${text || `🎬 «${m.title}» ещё не загружен`}</p><label class="btn small primary">📁 Выбрать видео с устройства<input type="file" accept="video/*" hidden></label><p class="hint small">или загрузите фильм на GitHub — см. README</p></div>`;
   body.querySelector('input').onchange = (e) => {
@@ -519,46 +552,83 @@ function filmPicker(film, text) {
     filmEmbed(film);
   };
 }
-const vidSync = { until: 0, p: 0, ct: 0 };
 function filmEmbed(film) {
+  clearFilmMedia();
   const sources = filmSources(film);
-  const body = $('#film-body');
-  body.innerHTML = '';
   if (!sources.length) { filmPicker(film); return; }
   const url = sources[0];
   const id = !url.startsWith('blob:') && driveFileId(url);
   const yt = url.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/);
   if (id || yt) {
+    setFilmMode('iframe');
     const f = document.createElement('iframe');
     f.src = id ? `https://drive.google.com/file/d/${id}/preview` : `https://www.youtube.com/embed/${yt[1]}?autoplay=1&rel=0`;
     f.allow = 'autoplay; fullscreen; encrypted-media';
     f.allowFullscreen = true;
-    body.appendChild(f);
+    $('#film-body').appendChild(f);
     return;
   }
+  setFilmMode('loading');
   const v = document.createElement('video');
-  v.controls = true; v.autoplay = true; v.playsInline = true; v.preload = 'auto';
-  let i = 0;
+  v.className = 'film-video';
+  v.playsInline = true; v.preload = 'auto';
+  filmMedia.video = v;
+  // each source: first with CORS (so it can go on the 3D screen), then without
+  const attempts = [];
+  for (const src of sources) {
+    if (sameOrigin(src)) attempts.push({ src, cors: false });
+    else attempts.push({ src, cors: true }, { src, cors: false });
+  }
+  let k = 0;
   const tryNext = () => {
-    if (i >= sources.length) { filmPicker(film, '😢 Фильм не загрузился (нужен файл .mp4)'); return; }
-    v.src = sources[i++];
+    if (filmMedia.video !== v) return;
+    if (k >= attempts.length) { filmPicker(film, '😢 Фильм не загрузился (нужен файл .mp4)'); return; }
+    const a = attempts[k++];
+    if (a.cors) v.crossOrigin = 'anonymous'; else v.removeAttribute('crossorigin');
+    v.src = a.src;
     v.play().catch(() => {});
   };
   v.addEventListener('error', tryNext);
+  v.addEventListener('loadeddata', () => {
+    if (filmMedia.video !== v || (filmMedia.mode !== 'loading')) return;
+    if (canTexture(v)) {
+      const tex = new THREE.VideoTexture(v);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      filmMedia.tex = tex;
+      world.cinema.showVideo(tex, v.videoWidth, v.videoHeight);
+      setFilmMode('texture');
+    } else {
+      v.controls = true;
+      $('#film-body').appendChild(v);
+      world.cinema.setScreenText(' ', '#000000');
+      setFilmMode('overlay');
+    }
+  });
   // keep both players on the same frame: play / pause / seek are mirrored
   const send = () => {
-    // skip the echo of a change that came from the partner
     if (now() < vidSync.until && v.paused === !!vidSync.p && Math.abs(v.currentTime - vidSync.ct) < 2) return;
     net.send({ t: 'vid', film, ct: v.currentTime, p: v.paused ? 1 : 0 });
   };
   v.addEventListener('play', send);
   v.addEventListener('pause', send);
   v.addEventListener('seeked', send);
-  body.appendChild(v);
+  v.addEventListener('play', renderFilmBar);
+  v.addEventListener('pause', renderFilmBar);
+  v.addEventListener('timeupdate', renderFilmBar);
+  document.body.appendChild(v); // hidden until we know how it will be shown
   tryNext();
 }
+function renderFilmBar() {
+  const v = filmMedia.video;
+  if (!v) return;
+  $('#film-play').textContent = v.paused ? '▶' : '⏸';
+  $('#film-time').textContent = `${fmtTime(v.currentTime)} / ${fmtTime(v.duration)}`;
+  const seek = $('#film-seek');
+  if (!seek.matches(':active')) seek.value = v.duration ? (v.currentTime / v.duration) * 1000 : 0;
+  $('#film-mute').textContent = v.muted ? '🔇' : '🔊';
+}
 function applyVideoSync(m) {
-  const v = $('#film-body video');
+  const v = filmMedia.video;
   if (!v || !state.movie || state.movie.phase !== 'play' || state.movie.film !== m.film) return;
   Object.assign(vidSync, { until: now() + 1.5, p: m.p ? 1 : 0, ct: m.ct });
   if (typeof m.ct === 'number' && Math.abs(v.currentTime - m.ct) > 1.5) v.currentTime = m.ct;
@@ -567,7 +637,7 @@ function applyVideoSync(m) {
 function playFilm(film) {
   $('#film-title').textContent = '🎬 ' + MOVIES[film].title;
   $('#film').hidden = false;
-  if (window.innerHeight > window.innerWidth) $('#film').classList.add('full');
+  document.body.classList.add('watching');
   world.cinema.setScreenText(' ', '#000000');
   filmEmbed(film);
   setMusic(null);
@@ -591,13 +661,28 @@ function positionFilm() {
 }
 function stopMovie() {
   state.movie = null;
+  clearFilmMedia();
   $('#countdown').hidden = true;
   $('#film').hidden = true;
   $('#film').classList.remove('full');
-  $('#film-body').innerHTML = '';
+  document.body.classList.remove('watching');
   if (world) world.cinema.setScreenText(screenIdleText());
 }
-$('#film-full').onclick = () => $('#film').classList.toggle('full');
+const togglePlay = () => { const v = filmMedia.video; if (v) { if (v.paused) v.play().catch(() => {}); else v.pause(); } };
+$('#film-play').onclick = togglePlay;
+$('#film-body').addEventListener('click', () => { if (filmMedia.mode === 'texture') togglePlay(); });
+$('#film-seek').addEventListener('input', (e) => { const v = filmMedia.video; if (v && v.duration) v.currentTime = (e.target.value / 1000) * v.duration; });
+$('#film-mute').onclick = () => { const v = filmMedia.video; if (v) { v.muted = !v.muted; renderFilmBar(); } };
+$('#film-full').onclick = () => {
+  const v = filmMedia.video;
+  if (filmMedia.mode === 'texture' && v) {
+    // native fullscreen player; when it closes the film keeps playing on the cinema screen
+    if (v.requestFullscreen) v.requestFullscreen().catch(() => {});
+    else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
+    return;
+  }
+  $('#film').classList.toggle('full');
+};
 $('#film-exit').onclick = () => standUp();
 
 // ------------------------------------------------------------
@@ -986,17 +1071,27 @@ function updatePartner(dt) {
   advanceStride(pt, dt);
 }
 
+function setFov(f) {
+  if (Math.abs(camera.fov - f) < 0.2) return;
+  camera.fov = f;
+  camera.updateProjectionMatrix();
+}
 function updateCamera(dt) {
   const me = state.me;
   const p = me.root.position;
   if (state.sitting && state.sitting.kind === 'cinema') {
     camTarget.lerp(world.cinema.center, 1 - Math.exp(-4 * dt));
-    const portrait = window.innerHeight > window.innerWidth;
-    camWant.set(p.x - (portrait ? 2.8 : 1.3), portrait ? 2.4 : 1.95, p.z);
+    // sit a bit behind your seat; on narrow (portrait) screens widen the lens so the whole screen fits
+    const camX = Math.max(CINEMA.x0 + 1.2, p.x - 1.3);
+    camWant.set(camX, 2.0, p.z);
     camera.position.lerp(camWant, 1 - Math.exp(-4 * dt));
     camera.lookAt(camTarget);
+    const d = world.cinema.center.x - camX;
+    const need = 2 * Math.atan(6.9 / d / camera.aspect) * 180 / Math.PI;
+    setFov(clamp(Math.max(60, need), 60, 100));
     return;
   }
+  setFov(60);
   let tx = p.x, tz = p.z;
   if (state.joint && state.partner) {
     tx = (p.x + state.partner.root.position.x) / 2;
@@ -1029,7 +1124,8 @@ function computeActions() {
   const near = (z) => z && Math.hypot(p.x - z.x, p.z - z.z) < z.r;
   const where = whereIs(world, p.x, p.z);
   if (state.sitting) {
-    acts.push({ id: 'stand', label: '⬆ Встать', fn: standUp });
+    // during the film the «✕ Встать» button lives in the film bar
+    if (!(state.movie && state.movie.phase === 'play')) acts.push({ id: 'stand', label: '⬆ Встать', fn: standUp });
   } else {
     if (near(world.zones.shop)) acts.push({ id: 'shop', label: '🛍️ Магазин', fn: () => openShop('shop') });
     if (near(world.zones.popcorn)) acts.push({ id: 'popcorn', label: '🍿 Попкорн', fn: () => openShop('popcorn') });
