@@ -559,22 +559,30 @@ function filmPicker(film, text) {
     filmEmbed(film);
   };
 }
+const YT_RE = /(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/;
+const isIframeSrc = (u) => (!u.startsWith('blob:') && !!driveFileId(u)) || YT_RE.test(u);
+// iPhone/iPad Safari refuses video served as "application/octet-stream" (how GitHub Releases serves files)
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isReleaseAsset = (u) => /github\.com\/[^/]+\/[^/]+\/releases\/download\//.test(u);
+function filmIframe(url) {
+  const id = driveFileId(url);
+  const yt = url.match(YT_RE);
+  setFilmMode('iframe');
+  world.cinema.setScreenText(' ', '#000000');
+  const f = document.createElement('iframe');
+  f.src = id ? `https://drive.google.com/file/d/${id}/preview` : `https://www.youtube.com/embed/${yt[1]}?autoplay=1&rel=0`;
+  f.allow = 'autoplay; fullscreen; encrypted-media';
+  f.allowFullscreen = true;
+  $('#film-proj').appendChild(f);
+}
 function filmEmbed(film) {
   clearFilmMedia();
   const sources = filmSources(film);
   if (!sources.length) { filmPicker(film); return; }
-  const url = sources[0];
-  const id = !url.startsWith('blob:') && driveFileId(url);
-  const yt = url.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/);
-  if (id || yt) {
-    setFilmMode('iframe');
-    const f = document.createElement('iframe');
-    f.src = id ? `https://drive.google.com/file/d/${id}/preview` : `https://www.youtube.com/embed/${yt[1]}?autoplay=1&rel=0`;
-    f.allow = 'autoplay; fullscreen; encrypted-media';
-    f.allowFullscreen = true;
-    $('#film-proj').appendChild(f);
-    return;
-  }
+  const iframeSrc = sources.find(isIframeSrc);
+  let videoSrcs = sources.filter((u) => !isIframeSrc(u));
+  if (IS_IOS && iframeSrc) videoSrcs = videoSrcs.filter((u) => !isReleaseAsset(u));
+  if (!videoSrcs.length) { filmIframe(iframeSrc); return; }
   setFilmMode('loading');
   const v = document.createElement('video');
   v.className = 'film-video';
@@ -582,21 +590,30 @@ function filmEmbed(film) {
   filmMedia.video = v;
   // each source: first with CORS (so it can go on the 3D screen), then without
   const attempts = [];
-  for (const src of sources) {
+  for (const src of videoSrcs) {
     if (sameOrigin(src)) attempts.push({ src, cors: false });
     else attempts.push({ src, cors: true }, { src, cors: false });
   }
-  let k = 0;
+  let k = 0, watchdog = 0;
   const tryNext = () => {
+    clearTimeout(watchdog);
     if (filmMedia.video !== v) return;
-    if (k >= attempts.length) { filmPicker(film, '😢 Фильм не загрузился (нужен файл .mp4)'); return; }
+    if (k >= attempts.length) {
+      if (iframeSrc) { clearFilmMedia(); filmIframe(iframeSrc); } // e.g. the Google Drive copy for iPhone
+      else filmPicker(film, IS_IOS ? '😢 iPhone не может открыть этот файл. Добавьте копию фильма в Google Drive — см. README' : '😢 Фильм не загрузился (нужен файл .mp4)');
+      return;
+    }
     const a = attempts[k++];
     if (a.cors) v.crossOrigin = 'anonymous'; else v.removeAttribute('crossorigin');
     v.src = a.src;
     v.play().catch(() => {});
+    // some browsers just hang on a file they can't play instead of reporting an error
+    const mine = k;
+    watchdog = setTimeout(() => { if (filmMedia.video === v && filmMedia.mode === 'loading' && k === mine) tryNext(); }, 15000);
   };
   v.addEventListener('error', tryNext);
   v.addEventListener('loadeddata', () => {
+    clearTimeout(watchdog);
     if (filmMedia.video !== v || (filmMedia.mode !== 'loading')) return;
     if (canTexture(v)) {
       const tex = new THREE.VideoTexture(v);
