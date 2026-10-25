@@ -602,3 +602,7 @@ body.touch.watching #actions { right: 12px; left: 150px; bottom: calc(14px + env
 /* no accidental blue text selection when tapping */
 body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 input, textarea { -webkit-user-select: text; user-select: text; }
+
+/* while watching on a phone you're seated: the walkie-talkie takes the joystick's place */
+body.touch.watching #joystick { display: none; }
+body.touch.watching #ptt { top: auto; right: auto; left: calc(22px + env(safe-area-inset-left)); bottom: calc(30px + env(safe-area-inset-bottom)); }

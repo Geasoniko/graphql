@@ -3,9 +3,10 @@
 //  Подробная инструкция на русском — в README.md
 // ============================================================
 
-// где искать фильм: сначала папка game/films, потом Releases на GitHub
-function film(name) {
-  return ['films/' + name, 'https://github.com/Geasoniko/graphql/releases/download/films/' + name];
+// где искать фильм: сначала папка game/films, потом Releases на GitHub,
+// а для iPhone — копия в Google Drive (вторая ссылка в film(...), iPhone не открывает файлы из Releases)
+function film(name, googleDrive) {
+  return ['films/' + name, 'https://github.com/Geasoniko/graphql/releases/download/films/' + name, googleDrive].filter(Boolean);
 }
 
 window.GALLERY_CONFIG = {
@@ -35,10 +36,12 @@ window.GALLERY_CONFIG = {
   //   • в папку game/films/                        — если файл меньше 100 МБ
   //   • или в Releases с тегом films               — если файл большой (до 2 ГБ)
   // Игра сама попробует оба места по очереди.
+  // Для iPhone: загрузите фильм ещё и в Google Drive («Все, у кого есть ссылка»)
+  // и вставьте ссылку вторым параметром: film('lalaland.mp4', 'https://drive.google.com/file/d/…/view')
   movies: [
-    { title: 'Ла-Ла Ленд', url: film('lalaland.mp4') },
-    { title: 'История игрушек 5', url: film('toystory5.mp4') },
-    { title: 'Миньоны и монстры', url: film('minions-monsters.mp4') },
+    { title: 'Ла-Ла Ленд', url: film('lalaland.mp4', '') },
+    { title: 'История игрушек 5', url: film('toystory5.mp4', '') },
+    { title: 'Миньоны и монстры', url: film('minions-monsters.mp4', '') },
   ],
 
   // Необязательно: ключ Google API вместо скрипта (для папки)
