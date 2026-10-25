@@ -15,12 +15,12 @@
 <div id="menu" class="screen">
   <div class="card">
     <h1>Наша галерея <span class="beat">💕</span></h1>
-    <p class="sub">Прогулка вдвоём по галерее наших фото</p>
+    <p class="sub">Галерея, магазин и кино — вдвоём</p>
 
     <div class="label">Выберите персонажа</div>
     <div class="chars">
-      <button class="char-btn selected" data-kind="girl"><span class="emoji">👧</span>Девушка</button>
-      <button class="char-btn" data-kind="boy"><span class="emoji">👦</span>Парень</button>
+      <button class="char-btn selected" data-kind="girl"><span class="emoji">👧</span>Девушка<small>🪙 5</small></button>
+      <button class="char-btn" data-kind="boy"><span class="emoji">👦</span>Парень<small>🪙 99 999</small></button>
     </div>
 
     <input id="name" class="input" placeholder="Ваше имя" maxlength="16" autocomplete="off" />
@@ -39,8 +39,13 @@
 <!-- ============ HUD ============ -->
 <div id="hud" hidden>
   <div class="top">
-    <div id="room-info"></div>
+    <div class="top-left">
+      <div id="room-info"></div>
+      <div id="coins" class="chip">🪙 0</div>
+      <div id="place" class="chip"></div>
+    </div>
     <div class="top-btns">
+      <button id="btn-inv" class="icon-btn" title="Мои вещи">🎒</button>
       <button id="btn-photos" class="icon-btn" title="Фото">🖼️</button>
       <button id="btn-sound" class="icon-btn" title="Звук">🔊</button>
       <button id="btn-help" class="icon-btn" title="Управление">❓</button>
@@ -54,11 +59,12 @@
     <button data-emote="dance2"><span>💃</span><small>Танец 2</small></button>
     <button data-emote="waltz"><span>💞</span><small>Вальс</small></button>
     <button data-emote="kiss"><span>💋</span><small>Поцелуй</small></button>
+    <button data-emote="sit"><span>🪑</span><small>Сесть</small></button>
     <button data-emote="wave"><span>👋</span><small>Привет</small></button>
     <button data-emote="hearts"><span>❤️</span><small>Сердечки</small></button>
   </div>
 
-  <button id="btn-view" class="pill" hidden>🔍 Смотреть фото</button>
+  <div id="actions"></div>
   <div id="toast"></div>
 </div>
 
@@ -71,14 +77,79 @@
   <button id="viewer-close" class="close-btn">✕</button>
 </div>
 
+<!-- ============ МАГАЗИН / ПОПКОРН ============ -->
+<div id="shop" class="overlay" hidden>
+  <div class="card wide">
+    <button class="close-btn" data-close>✕</button>
+    <h2 id="shop-title">🛍️ Магазин</h2>
+    <div class="wallet">У вас: <b id="shop-coins">🪙 0</b></div>
+    <div id="shop-tabs" class="tabs"></div>
+    <div id="shop-list" class="grid"></div>
+  </div>
+</div>
+
+<!-- ============ КАССА ============ -->
+<div id="kassa" class="overlay" hidden>
+  <div class="card wide">
+    <button class="close-btn" data-close>✕</button>
+    <h2>🎟️ Касса кинотеатра</h2>
+    <div class="wallet">У вас: <b id="kassa-coins">🪙 0</b> · билет 🪙 300</div>
+    <div id="films" class="films"></div>
+    <div id="seatmap-wrap">
+      <div class="screen-bar">ЭКРАН</div>
+      <div id="seatmap"></div>
+      <div class="legend"><span class="seat free"></span>свободно <span class="seat taken"></span>занято <span class="seat sel"></span>выбрано</div>
+    </div>
+    <button id="buy-tickets" class="btn primary" disabled>Выберите места</button>
+    <p class="hint small">Можно выбрать 2 места — для себя и для партнёра 💕 Второй билет подарите в 🎒.</p>
+  </div>
+</div>
+
+<!-- ============ ИНВЕНТАРЬ ============ -->
+<div id="inv" class="overlay" hidden>
+  <div class="card wide">
+    <button class="close-btn" data-close>✕</button>
+    <h2 id="inv-title">🎒 Мои вещи</h2>
+    <div class="wallet">У вас: <b id="inv-coins">🪙 0</b></div>
+    <div id="inv-list" class="list"></div>
+  </div>
+</div>
+
+<!-- ============ БИЛЕТ ============ -->
+<div id="ticket-view" class="overlay" hidden>
+  <div class="ticket">
+    <div class="ticket-top">🎬 КИНОТЕАТР «НАША ГАЛЕРЕЯ»</div>
+    <div id="ticket-film" class="ticket-film"></div>
+    <div class="ticket-row">
+      <div><small>ЗАЛ</small><b>1</b></div>
+      <div><small>РЯД</small><b id="ticket-r"></b></div>
+      <div><small>МЕСТО</small><b id="ticket-s"></b></div>
+      <div><small>СЕАНС</small><b id="ticket-time"></b></div>
+    </div>
+    <div class="ticket-bottom">Приятного просмотра 🍿 · 🪙 300</div>
+    <button class="btn small" data-close>Закрыть</button>
+  </div>
+</div>
+
+<!-- ============ КИНО ============ -->
+<div id="countdown" hidden></div>
+<div id="film" hidden>
+  <div id="film-body"></div>
+  <div id="film-bar">
+    <span id="film-title"></span>
+    <button id="film-full" class="btn small">⛶ На весь экран</button>
+    <button id="film-exit" class="btn small ghost">✕ Встать</button>
+  </div>
+</div>
+
 <!-- ============ НАСТРОЙКА ФОТО ============ -->
 <div id="photos-panel" class="overlay" hidden>
   <div class="card wide">
     <button class="close-btn" data-close>✕</button>
     <h2>🖼️ Фото для галереи</h2>
     <p class="hint">
-      Вставьте ссылки на фото из <b>Google Drive</b> — по одной на строку.<br />
-      В Drive: «Поделиться» → «Все, у кого есть ссылка» → «Копировать ссылку».
+      Вставьте ссылку на <b>папку</b> Google Drive или ссылки на отдельные фото — по одной на строку.<br />
+      Сколько фото — столько рамок: галерея сама добавит залы 🏛️
     </p>
     <textarea id="photo-links" class="input" rows="7" placeholder="https://drive.google.com/file/d/.../view?usp=sharing"></textarea>
     <div class="row">
@@ -97,27 +168,31 @@
 <div id="help" class="overlay" hidden>
   <div class="card wide">
     <button class="close-btn" data-close>✕</button>
-    <h2>Управление</h2>
+    <h2>Как играть</h2>
     <div class="help-grid">
       <div><b>💻 Ноутбук</b>
         <ul>
-          <li><kbd>W A S D</kbd> / стрелки — ходить</li>
-          <li><kbd>Shift</kbd> — бежать</li>
-          <li>Мышь (зажать) — крутить камеру, колесо — приблизить</li>
-          <li><kbd>1</kbd>–<kbd>6</kbd> — эмоции</li>
-          <li><kbd>E</kbd> или клик по фото — смотреть фото</li>
+          <li><kbd>W A S D</kbd> / стрелки — ходить, <kbd>Shift</kbd> — бежать</li>
+          <li>Мышь (зажать) — камера, колесо — зум</li>
+          <li><kbd>1</kbd>–<kbd>7</kbd> — эмоции, <kbd>E</kbd> — действие рядом</li>
+          <li><kbd>I</kbd> — мои вещи</li>
         </ul>
       </div>
       <div><b>📱 Телефон</b>
         <ul>
-          <li>Джойстик слева — ходить (дальше — быстрее)</li>
-          <li>Провести пальцем по экрану — крутить камеру</li>
-          <li>Двумя пальцами — приблизить</li>
-          <li>Нажать на фото — смотреть</li>
+          <li>Джойстик — ходить (дальше — быстрее)</li>
+          <li>Провести пальцем — камера, двумя — зум</li>
+          <li>Кнопки снизу — действия рядом</li>
         </ul>
       </div>
     </div>
-    <p class="hint">💞 Вальс и 💋 поцелуй — совместные: подойдите к партнёру поближе. Чтобы закончить — просто идите.</p>
+    <ul class="hint">
+      <li>🖼️ Галерея — вперёд из холла, залы идут один за другим</li>
+      <li>🛍️ Магазин слева: цветы, одежда, смартфоны, сумки</li>
+      <li>🎟️ Касса и 🍿 попкорн справа, дверь в 🎬 кинотеатр между ними</li>
+      <li>🎁 Покупки попадают вам в 🎒 — оттуда можно подарить партнёру, положить в сумку, взять в руку</li>
+      <li>💞 Вальс и 💋 поцелуй — подойдите к партнёру. 🪑 — сесть на скамейку или диван</li>
+    </ul>
   </div>
 </div>
 
