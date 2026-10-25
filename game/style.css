@@ -567,6 +567,38 @@ body.touch.watching #actions { right: 12px; left: 150px; bottom: calc(14px + env
 #film.proj #film-bar { pointer-events: auto; }
 #film.full.proj, #film.full.tex { background: transparent; }
 
+/* voice: walkie-talkie button + call button */
+#ptt {
+  position: fixed;
+  z-index: 14;
+  right: calc(12px + env(safe-area-inset-right));
+  top: 40%;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(20, 12, 24, 0.75);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  touch-action: none;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+}
+#ptt span { font-size: 28px; line-height: 1; }
+#ptt small { font-size: 10px; color: var(--muted); }
+#ptt.rec { background: #e0245e; border-color: #fff; animation: ptt-pulse 1s infinite; }
+#ptt.rec small { color: #fff; }
+@keyframes ptt-pulse { 50% { transform: scale(1.08); } }
+#btn-call.on { background: #2e9e5b; }
+#btn-call.ring { background: #2e9e5b; animation: ptt-pulse 0.8s infinite; }
+@media (orientation: landscape) and (max-height: 500px) {
+  #ptt { top: 26%; width: 62px; height: 62px; }
+  #ptt span { font-size: 22px; }
+}
+
 /* no accidental blue text selection when tapping */
 body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 input, textarea { -webkit-user-select: text; user-select: text; }
