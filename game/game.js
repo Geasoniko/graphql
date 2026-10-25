@@ -502,21 +502,30 @@ function updateMovie(dt) {
   }
   if (mv.phase === 'play') positionFilm();
 }
-function filmEmbed(film) {
+// url in photos.js can be one link or a list of links tried in order
+function filmSources(film) {
   const m = MOVIES[film] || {};
-  const url = state.localFilms[film] || m.url || '';
+  if (state.localFilms[film]) return [state.localFilms[film]];
+  return (Array.isArray(m.url) ? m.url : [m.url]).filter(Boolean);
+}
+function filmPicker(film, text) {
+  const m = MOVIES[film] || {};
+  const body = $('#film-body');
+  body.innerHTML = `<div class="film-empty"><p>${text || `🎬 «${m.title}» ещё не загружен`}</p><label class="btn small primary">📁 Выбрать видео с устройства<input type="file" accept="video/*" hidden></label><p class="hint small">или загрузите фильм на GitHub — см. README</p></div>`;
+  body.querySelector('input').onchange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    state.localFilms[film] = URL.createObjectURL(f);
+    filmEmbed(film);
+  };
+}
+const vidSync = { until: 0, p: 0, ct: 0 };
+function filmEmbed(film) {
+  const sources = filmSources(film);
   const body = $('#film-body');
   body.innerHTML = '';
-  if (!url) {
-    body.innerHTML = `<div class="film-empty"><p>🎬 «${m.title}» ещё не добавлен</p><label class="btn small primary">📁 Выбрать видео с устройства<input type="file" accept="video/*" hidden></label><p class="hint small">или вставьте ссылку в photos.js → movies</p></div>`;
-    body.querySelector('input').onchange = (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      state.localFilms[film] = URL.createObjectURL(f);
-      filmEmbed(film);
-    };
-    return;
-  }
+  if (!sources.length) { filmPicker(film); return; }
+  const url = sources[0];
   const id = !url.startsWith('blob:') && driveFileId(url);
   const yt = url.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/);
   if (id || yt) {
@@ -525,12 +534,35 @@ function filmEmbed(film) {
     f.allow = 'autoplay; fullscreen; encrypted-media';
     f.allowFullscreen = true;
     body.appendChild(f);
-  } else {
-    const v = document.createElement('video');
-    v.src = url; v.controls = true; v.autoplay = true; v.playsInline = true;
-    body.appendChild(v);
-    v.play().catch(() => {});
+    return;
   }
+  const v = document.createElement('video');
+  v.controls = true; v.autoplay = true; v.playsInline = true; v.preload = 'auto';
+  let i = 0;
+  const tryNext = () => {
+    if (i >= sources.length) { filmPicker(film, '😢 Фильм не загрузился (нужен файл .mp4)'); return; }
+    v.src = sources[i++];
+    v.play().catch(() => {});
+  };
+  v.addEventListener('error', tryNext);
+  // keep both players on the same frame: play / pause / seek are mirrored
+  const send = () => {
+    // skip the echo of a change that came from the partner
+    if (now() < vidSync.until && v.paused === !!vidSync.p && Math.abs(v.currentTime - vidSync.ct) < 2) return;
+    net.send({ t: 'vid', film, ct: v.currentTime, p: v.paused ? 1 : 0 });
+  };
+  v.addEventListener('play', send);
+  v.addEventListener('pause', send);
+  v.addEventListener('seeked', send);
+  body.appendChild(v);
+  tryNext();
+}
+function applyVideoSync(m) {
+  const v = $('#film-body video');
+  if (!v || !state.movie || state.movie.phase !== 'play' || state.movie.film !== m.film) return;
+  Object.assign(vidSync, { until: now() + 1.5, p: m.p ? 1 : 0, ct: m.ct });
+  if (typeof m.ct === 'number' && Math.abs(v.currentTime - m.ct) > 1.5) v.currentTime = m.ct;
+  if (m.p) v.pause(); else v.play().catch(() => {});
 }
 function playFilm(film) {
   $('#film-title').textContent = '🎬 ' + MOVIES[film].title;
@@ -1267,6 +1299,9 @@ function onNetData(m) {
       if (world) refreshBots();
       break;
     }
+    case 'vid':
+      applyVideoSync(m);
+      break;
     case 'movie':
       if (state.sitting && state.sitting.kind === 'cinema' && state.sitting.film === m.film) startCountdown(m.film, false);
       break;
