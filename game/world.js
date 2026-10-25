@@ -455,7 +455,19 @@ export function buildWorld({ scene, photos, maxAniso = 4, title = 'Наша ис
       new THREE.Vector3(SX - 0.02, SY - SH / 2, 12 + SW / 2), new THREE.Vector3(SX - 0.02, SY + SH / 2, 12 + SW / 2),
     ],
     center: new THREE.Vector3(SX, SY, 12),
+    showVideo(tex, w, h) {
+      // letterbox the film inside the screen area
+      const aspect = w && h ? w / h : 16 / 9;
+      let pw = SW, ph = SW / aspect;
+      if (ph > SH) { ph = SH; pw = SH * aspect; }
+      screen.scale.set(pw, ph, 1);
+      const old = screenMat.map;
+      screenMat.map = tex;
+      screenMat.needsUpdate = true;
+      if (old && old.userData.owned) old.dispose();
+    },
     setScreenText(text, bg = '#1b1220') {
+      screen.scale.set(SW, SH, 1);
       const t = textTexture(text, { w: 1024, h: 460, font: 'bold 64px system-ui, sans-serif', color: '#ffffff', bg, glow: 'rgba(255,100,160,0.8)' });
       t.userData.owned = true;
       const old = screenMat.map;
