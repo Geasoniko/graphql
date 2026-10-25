@@ -5,14 +5,14 @@
 
 window.GALLERY_CONFIG = {
   // Надпись на стене последнего зала галереи
-  title: 'Наша история 💕',
+  title: ' 💕',
 
   // ---------- ФОТО ----------
   // 1) Папка Google Drive: все фото из неё сами повесятся в галерею.
   //    Вставьте ссылку на папку (папка открыта «всем, у кого есть ссылка»)
   //    и адрес скрипта driveListUrl (как его сделать — README, 2 минуты).
-  driveFolder: '',
-  driveListUrl: '',
+  driveFolder: 'https://drive.google.com/drive/folders/1tqSZIAm_YwIo5Yv6njTpPEg1Wgn902aV?usp=sharing',
+  driveListUrl: 'https://script.google.com/macros/s/AKfycbwveBLXZcN0ZK5H9hXGGqPrRQBLLSzseurIu-XzS0im6zgdgY58sbjf4jy56U5nibaF/exec',
 
   // 2) Или отдельные фото (тоже Google Drive, доступ «все, у кого есть ссылка»)
   photos: [
