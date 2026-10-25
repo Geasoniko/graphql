@@ -44,6 +44,10 @@ window.GALLERY_CONFIG = {
   // Необязательно: ключ Google API вместо скрипта (для папки)
   driveApiKey: '',
 
+  // Необязательно: свои STUN/TURN-серверы для игры вдвоём через разные сети
+  // (по умолчанию уже есть бесплатные). Пример: [{ urls: 'turn:…', username: '…', credential: '…' }]
+  iceServers: null,
+
   // Необязательно: свой сервер PeerJS для игры вдвоём
   // Пример: { host: 'localhost', port: 9000, path: '/', secure: false }
   peerServer: null,
