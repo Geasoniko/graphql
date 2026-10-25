@@ -1244,11 +1244,21 @@ const net = {
     try { this.conn.send(msg); } catch { /* channel closing */ }
   },
 };
+// STUN finds a direct path; TURN relays the data when phones sit behind mobile-network NAT
+const DEFAULT_ICE = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
+];
 function peerOptions() {
-  const o = { debug: 1 };
+  const o = { debug: 1, config: { iceServers: CFG.iceServers || DEFAULT_ICE } };
   if (CFG.peerServer) Object.assign(o, CFG.peerServer);
   return o;
 }
+// a phone freezes a hidden tab and drops the link to the PeerJS server; reconnect when the game is back on screen
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && net.peer && !net.peer.destroyed && net.peer.disconnected) net.peer.reconnect();
+});
 function hostRoom(onReady, onError, attempt = 0) {
   if (typeof Peer === 'undefined') { onError('Не загрузилась библиотека для игры вдвоём (PeerJS)'); return; }
   const code = randomCode();
@@ -1256,7 +1266,14 @@ function hostRoom(onReady, onError, attempt = 0) {
   net.peer = peer;
   peer.on('open', () => { net.code = code; onReady(code); });
   peer.on('connection', (c) => {
-    if (net.conn && net.conn.open) { c.on('open', () => { c.send({ t: 'full' }); setTimeout(() => c.close(), 500); }); return; }
+    if (net.conn && net.conn.open && c.peer !== net.conn.peer) { c.on('open', () => { c.send({ t: 'full' }); setTimeout(() => c.close(), 500); }); return; }
+    if (net.conn && c.peer === net.conn.peer) {
+      // the same partner is retrying: drop the old half-open link quietly and take the new one
+      const old = net.conn;
+      net.conn = null;
+      net.connected = false;
+      try { old.close(); } catch { /* already closed */ }
+    }
     setupConn(c);
   });
   peer.on('disconnected', () => { if (!peer.destroyed) peer.reconnect(); });
@@ -1271,14 +1288,29 @@ function joinRoom(code, onError) {
   const peer = new Peer(peerOptions());
   net.peer = peer;
   net.code = code;
-  let opened = false;
-  peer.on('open', () => {
-    setupConn(peer.connect(CFG.roomPrefix + code, { reliable: true }), () => { opened = true; });
-    setTimeout(() => { if (!opened) onError('Комната не отвечает. Проверьте код 🙏'); }, 12000);
-  });
+  let opened = false, tries = 0, lastErr = '';
+  const MAX_TRIES = 6;
+  // the host may have the game in the background for a moment (sending the code), so keep knocking
+  const attempt = () => {
+    if (opened || peer.destroyed) return;
+    tries++;
+    lastErr = '';
+    if (tries > 1) menuStatus(`Подключаемся… попытка ${tries} из ${MAX_TRIES}`);
+    const c = peer.connect(CFG.roomPrefix + code, { reliable: true });
+    setupConn(c, () => { opened = true; });
+    setTimeout(() => {
+      if (opened || peer.destroyed) return;
+      const ice = c.peerConnection ? c.peerConnection.iceConnectionState : '';
+      if (tries < MAX_TRIES) { try { c.close(); } catch { /* ignore */ } attempt(); return; }
+      if (lastErr === 'peer-unavailable') onError('Комната «' + code + '» не найдена 🙏 Проверьте код, или пусть партнёр создаст комнату заново');
+      else if (ice === 'failed' || ice === 'disconnected') onError('Не получается соединиться между вашими сетями 😢 Попробуйте обоим подключиться к одному Wi-Fi');
+      else onError('Партнёр не отвечает 🙏 Пусть он откроет игру на экране и не сворачивает её, пока вы входите');
+    }, 10000);
+  };
+  peer.on('open', attempt);
   peer.on('error', (e) => {
-    if (e.type === 'peer-unavailable') onError('Комната «' + code + '» не найдена. Проверьте код 🙏');
-    else if (state.started) toast('Связь: ' + (e.type || e.message));
+    if (e.type === 'peer-unavailable') { lastErr = e.type; return; } // retried by attempt()
+    if (state.started) toast('Связь: ' + (e.type || e.message));
     else onError(netErrorText(e));
   });
 }
@@ -1549,7 +1581,7 @@ function updateRoomInfo() {
   const el = $('#room-info');
   if (state.mode === 'solo') { el.innerHTML = '🚶 Прогулка в одиночку'; return; }
   const on = net.connected;
-  el.innerHTML = `<span class="dot ${on ? 'on' : ''}"></span>${on ? 'Вы вдвоём 💕' : 'Ждём партнёра…'} · код <b>${net.code}</b>` + (on ? '' : '<br><button id="copy-link">📋 Скопировать приглашение</button>');
+  el.innerHTML = `<span class="dot ${on ? 'on' : ''}"></span>${on ? 'Вы вдвоём 💕' : 'Ждём партнёра…'} · код <b>${net.code}</b>` + (on ? '' : '<br><button id="copy-link">📋 Скопировать приглашение</button><br><small>Не сворачивайте игру, пока партнёр входит</small>');
   const cb = $('#copy-link');
   if (cb) cb.addEventListener('click', async () => {
     const text = `Заходи ко мне в нашу галерею 💕 Код: ${net.code}\n${inviteLink()}`;
