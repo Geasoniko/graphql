@@ -1268,7 +1268,7 @@ function frame() {
     const a = state.me.anim;
     if (!state.movie) setMusic(a === 'dance1' || a === 'dance2' ? 'dance' : a === 'waltz' ? 'waltz' : null);
 
-    if (net.connected && t - state.lastSend > 1 / 15) {
+    if (net.connected && t - state.lastSend > (net.via === 'relay' ? 1 / 8 : 1 / 15)) {
       state.lastSend = t;
       const p = state.me.root.position;
       const tk = myTicket();
@@ -1288,24 +1288,29 @@ function frame() {
 }
 
 // ------------------------------------------------------------
-//  Networking (PeerJS / WebRTC)
+//  Networking: a direct WebRTC link (PeerJS) first. If the two phones can't reach each other
+//  (different mobile networks, strict NAT), the same messages go through a public MQTT relay,
+//  encrypted with a key derived from the room code so the relay can't read them.
 // ------------------------------------------------------------
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const randomCode = () => Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
 const net = {
-  peer: null, conn: null, connected: false, code: '', lastRecv: 0,
+  peer: null, conn: null, relay: null, via: null, connected: false, code: '', lastRecv: 0, onUp: null,
+  id: Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6),
   send(msg) {
-    if (!this.connected || !this.conn || !this.conn.open) return;
-    try { this.conn.send(msg); } catch { /* channel closing */ }
+    if (!this.connected) return;
+    if (this.via === 'p2p') {
+      if (this.conn && this.conn.open) try { this.conn.send(msg); } catch { /* channel closing */ }
+    } else if (this.via === 'relay') relaySend(msg);
   },
 };
 // STUN finds a direct path; TURN relays the data when phones sit behind mobile-network NAT
 const DEFAULT_ICE = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
   { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
-  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
 ];
+const useP2P = () => CFG.p2p !== false && typeof Peer !== 'undefined';
 function peerOptions() {
   const o = { debug: 1, config: { iceServers: CFG.iceServers || DEFAULT_ICE } };
   if (CFG.peerServer) Object.assign(o, CFG.peerServer);
@@ -1315,105 +1320,235 @@ function peerOptions() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && net.peer && !net.peer.destroyed && net.peer.disconnected) net.peer.reconnect();
 });
-function hostRoom(onReady, onError, attempt = 0) {
-  if (typeof Peer === 'undefined') { onError('Не загрузилась библиотека для игры вдвоём (PeerJS)'); return; }
-  const code = randomCode();
-  const peer = new Peer(CFG.roomPrefix + code, peerOptions());
-  net.peer = peer;
-  peer.on('open', () => { net.code = code; onReady(code); });
-  peer.on('connection', (c) => {
-    if (net.conn && net.conn.open && c.peer !== net.conn.peer) { c.on('open', () => { c.send({ t: 'full' }); setTimeout(() => c.close(), 500); }); return; }
-    if (net.conn && c.peer === net.conn.peer) {
-      // the same partner is retrying: drop the old half-open link quietly and take the new one
-      const old = net.conn;
-      net.conn = null;
-      net.connected = false;
-      try { old.close(); } catch { /* already closed */ }
+
+// ---------- relay (MQTT over WebSocket) ----------
+const RELAY_BROKERS = CFG.relayBrokers || ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://test.mosquitto.org:8081'];
+const hexOf = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+const sha = (text) => crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+function connectBroker(url) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const c = mqtt.connect(url, { clientId: 'ng_' + net.id + '_' + Math.random().toString(36).slice(2, 6), clean: true, connectTimeout: 7000, reconnectPeriod: 0 });
+    const done = (ok) => {
+      if (settled) return;
+      settled = true;
+      if (!ok) try { c.end(true); } catch { /* ignore */ }
+      resolve(ok ? c : null);
+    };
+    c.once('connect', () => done(true));
+    c.once('error', () => done(false));
+    setTimeout(() => done(false), 8000);
+  });
+}
+async function relayOpen(code) {
+  if (typeof mqtt === 'undefined' || !window.crypto || !crypto.subtle) return null;
+  const key = await crypto.subtle.importKey('raw', await sha('nasha-galereya|key|' + code), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  const topic = 'nasha-galereya/v1/' + hexOf(await sha('nasha-galereya|topic|' + code)).slice(0, 32);
+  for (const url of RELAY_BROKERS) {
+    if (net.code !== code) return null;
+    const client = await connectBroker(url);
+    if (!client) continue;
+    if (net.code !== code) { client.end(true); return null; }
+    client.options.reconnectPeriod = 2000; // from now on keep the link alive
+    const relay = { client, key, topic, url, partner: null, chain: Promise.resolve() };
+    client.subscribe(topic, { qos: 0 });
+    client.on('message', (t, payload) => relayReceive(relay, payload));
+    net.relay = relay;
+    return relay;
+  }
+  return null;
+}
+function relayClose() {
+  if (net.relay) try { net.relay.client.end(true); } catch { /* ignore */ }
+  net.relay = null;
+}
+let warnedBigPhotos = false;
+function relaySend(msg, to) {
+  const r = net.relay;
+  if (!r) return;
+  if (msg.t === 'p' && JSON.stringify(msg).length > 200000) {
+    // photos uploaded from the device are too heavy for the relay — send only the links
+    msg = { t: 'p', list: msg.list.filter((x) => !x.startsWith('data:')) };
+    if (!warnedBigPhotos) { warnedBigPhotos = true; toast('Фото с устройства не дойдут через сервер — только ссылки из Drive', 4000); }
+  }
+  const body = new TextEncoder().encode(JSON.stringify({ f: net.id, to: to || r.partner || undefined, m: msg }));
+  // keep messages in order: encrypt + publish one after another
+  r.chain = r.chain.then(async () => {
+    if (!r.client.connected) return;
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, r.key, body));
+    const out = new Uint8Array(12 + ct.length);
+    out.set(iv); out.set(ct, 12);
+    r.client.publish(r.topic, out, { qos: 0 });
+  }).catch(() => {});
+}
+async function relayReceive(r, payload) {
+  let env;
+  try {
+    const b = new Uint8Array(payload);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, r.key, b.slice(12));
+    env = JSON.parse(new TextDecoder().decode(pt));
+  } catch { return; }
+  if (!env || env.f === net.id || (env.to && env.to !== net.id)) return;
+  const m = env.m || {};
+  if (state.mode === 'host') {
+    if (m.t === 'knock') {
+      if (net.connected && net.via === 'p2p') return; // already linked directly
+      if (net.connected && r.partner && r.partner !== env.f) { relaySend({ t: 'full' }, env.f); return; }
+      r.partner = env.f;
+      if (!net.connected) linkUp('relay');
+      return;
     }
-    setupConn(c);
-  });
-  peer.on('disconnected', () => { if (!peer.destroyed) peer.reconnect(); });
-  peer.on('error', (e) => {
-    if (e.type === 'unavailable-id' && attempt < 3) { peer.destroy(); hostRoom(onReady, onError, attempt + 1); return; }
-    if (state.started) toast('Связь: ' + (e.type || e.message));
-    else onError(netErrorText(e));
-  });
+    if (env.f !== r.partner) return;
+  } else {
+    if (m.t === 'knock') return; // another guest
+    if (m.t === 'full') { toast('В комнате уже двое 🙈'); return; }
+    if (!r.partner) r.partner = env.f; // the first answer comes from the host
+    if (env.f !== r.partner) return;
+    if (!net.connected && m.t === 'hello') linkUp('relay');
+  }
+  if (!net.connected) return;
+  net.lastRecv = now();
+  onNetData(m);
 }
-function joinRoom(code, onError) {
-  if (typeof Peer === 'undefined') { onError('Не загрузилась библиотека для игры вдвоём (PeerJS)'); return; }
-  const peer = new Peer(peerOptions());
-  net.peer = peer;
-  net.code = code;
-  let opened = false, tries = 0, lastErr = '';
-  const MAX_TRIES = 6;
-  // the host may have the game in the background for a moment (sending the code), so keep knocking
-  const attempt = () => {
-    if (opened || peer.destroyed) return;
-    tries++;
-    lastErr = '';
-    if (tries > 1) menuStatus(`Подключаемся… попытка ${tries} из ${MAX_TRIES}`);
-    const c = peer.connect(CFG.roomPrefix + code, { reliable: true });
-    setupConn(c, () => { opened = true; });
-    setTimeout(() => {
-      if (opened || peer.destroyed) return;
-      const ice = c.peerConnection ? c.peerConnection.iceConnectionState : '';
-      if (tries < MAX_TRIES) { try { c.close(); } catch { /* ignore */ } attempt(); return; }
-      if (lastErr === 'peer-unavailable') onError('Комната «' + code + '» не найдена 🙏 Проверьте код, или пусть партнёр создаст комнату заново');
-      else if (ice === 'failed' || ice === 'disconnected') onError('Не получается соединиться между вашими сетями 😢 Попробуйте обоим подключиться к одному Wi-Fi');
-      else onError('Партнёр не отвечает 🙏 Пусть он откроет игру на экране и не сворачивает её, пока вы входите');
-    }, 10000);
-  };
-  peer.on('open', attempt);
-  peer.on('error', (e) => {
-    if (e.type === 'peer-unavailable') { lastErr = e.type; return; } // retried by attempt()
-    if (state.started) toast('Связь: ' + (e.type || e.message));
-    else onError(netErrorText(e));
-  });
+
+// ---------- link up / down (either transport) ----------
+function linkUp(via) {
+  net.via = via;
+  net.connected = true;
+  net.lastRecv = now();
+  net.send({ t: 'hello', k: state.myKind, n: state.myName });
+  if (state.mode === 'host') net.send({ t: 'p', list: photos });
+  for (const [film, set] of Object.entries(state.takenSeats)) net.send({ t: 'seats', film: +film, list: [...set] });
+  updateRoomInfo();
+  if (net.onUp) { const f = net.onUp; net.onUp = null; f(); }
 }
-function netErrorText(e) {
-  if (e.type === 'network' || e.type === 'server-error' || e.type === 'socket-error') return 'Нет связи с сервером. Проверьте интернет.';
-  if (e.type === 'browser-incompatible') return 'Браузер не поддерживает WebRTC 😢';
-  return 'Ошибка связи: ' + (e.type || e.message);
-}
-function setupConn(c, onOpen) {
-  c.on('open', () => {
-    if (net.connected && net.conn !== c) { c.close(); return; }
-    net.conn = c;
-    net.connected = true;
-    net.lastRecv = now();
-    if (onOpen) onOpen();
-    c.send({ t: 'hello', k: state.myKind, n: state.myName });
-    if (state.mode === 'host') c.send({ t: 'p', list: photos });
-    for (const [film, set] of Object.entries(state.takenSeats)) c.send({ t: 'seats', film: +film, list: [...set] });
-    updateRoomInfo();
-  });
-  c.on('data', (m) => { net.lastRecv = now(); onNetData(m); });
-  c.on('close', () => dropConn(c));
-  c.on('error', () => {});
-}
-function dropConn(c) {
-  if (!c || net.conn !== c) return;
-  net.conn = null;
+function linkDown() {
+  if (!net.connected) return;
   net.connected = false;
-  try { c.close(); } catch { /* already closed */ }
+  net.via = null;
+  if (net.conn) { const c = net.conn; net.conn = null; try { c.close(); } catch { /* already closed */ } }
+  if (net.relay && state.mode === 'host') net.relay.partner = null;
   if (!state.started) return;
   removePartner();
   toast(state.mode === 'guest' ? 'Связь потеряна… переподключаемся 🔄' : 'Партнёр вышел 💔 Ждём, когда вернётся', 3500);
   updateRoomInfo();
   if (state.mode === 'guest') reconnectGuest(0);
 }
+// Both ends always end up on the same channel: a direct link that opens later takes over from the
+// relay on both sides, and incoming data is accepted from either channel (each message is sent on one).
+function setupConn(c) {
+  c.on('open', () => {
+    if (net.via === 'p2p' && net.conn && net.conn !== c && net.conn.open) { c.close(); return; }
+    const upgrade = net.connected;
+    net.conn = c;
+    if (upgrade) { net.via = 'p2p'; updateRoomInfo(); return; }
+    linkUp('p2p');
+  });
+  c.on('data', (m) => {
+    if (net.conn !== c || !net.connected) return;
+    net.lastRecv = now();
+    onNetData(m);
+  });
+  c.on('close', () => {
+    if (net.conn !== c) return;
+    net.conn = null;
+    if (net.via !== 'p2p') return;
+    if (net.relay && net.relay.partner) { net.via = 'relay'; updateRoomInfo(); } // fall back to the relay
+    else linkDown();
+  });
+  c.on('error', () => {});
+}
+
+function hostRoom(onReady, onError, attempt = 0) {
+  const code = randomCode();
+  net.code = code;
+  let ready = false;
+  const go = () => { if (!ready) { ready = true; onReady(code); } };
+  relayOpen(code).then((r) => { if (r) go(); });
+  if (useP2P()) {
+    const peer = new Peer(CFG.roomPrefix + code, peerOptions());
+    net.peer = peer;
+    peer.on('open', go);
+    peer.on('connection', (c) => {
+      if (net.connected && net.via === 'p2p' && net.conn && c.peer !== net.conn.peer) { c.on('open', () => { c.send({ t: 'full' }); setTimeout(() => c.close(), 500); }); return; }
+      if (net.via === 'p2p' && net.conn && c.peer === net.conn.peer) {
+        // the same partner is retrying: drop the old half-open link quietly and take the new one
+        const old = net.conn;
+        net.conn = null;
+        net.connected = false;
+        net.via = null;
+        try { old.close(); } catch { /* already closed */ }
+      }
+      setupConn(c);
+    });
+    peer.on('disconnected', () => { if (!peer.destroyed) peer.reconnect(); });
+    peer.on('error', (e) => {
+      if (e.type === 'unavailable-id' && attempt < 3 && !ready) { peer.destroy(); relayClose(); hostRoom(onReady, onError, attempt + 1); }
+    });
+  }
+  setTimeout(() => { if (!ready && net.code === code) onError('Нет связи с сервером. Проверьте интернет 🙏'); }, 16000);
+}
+
+function joinRoom(code, onError) {
+  net.code = code;
+  let lastErr = '';
+  // 1) direct link
+  if (useP2P()) {
+    const peer = new Peer(peerOptions());
+    net.peer = peer;
+    let tries = 0;
+    const attempt = () => {
+      if (net.connected || peer.destroyed) return;
+      tries++;
+      const c = peer.connect(CFG.roomPrefix + code, { reliable: true });
+      setupConn(c);
+      setTimeout(() => {
+        if (net.connected || peer.destroyed) return;
+        try { c.close(); } catch { /* ignore */ }
+        if (tries < 6) attempt();
+      }, 10000);
+    };
+    peer.on('open', attempt);
+    peer.on('error', (e) => { lastErr = e.type; });
+  }
+  // 2) relay: start knocking if the direct link hasn't come up in a few seconds
+  relayOpen(code).then((r) => {
+    if (!r) return;
+    let knocks = 0;
+    const knock = () => {
+      if (net.connected || net.code !== code || knocks++ > 40) return;
+      relaySend({ t: 'knock' });
+      setTimeout(knock, 1500);
+    };
+    setTimeout(knock, useP2P() ? 4000 : 0);
+  });
+  // 3) give up after a minute
+  setTimeout(() => {
+    if (net.connected || net.code !== code) return;
+    if (!net.relay && lastErr === 'peer-unavailable') onError('Комната «' + code + '» не найдена 🙏 Проверьте код');
+    else onError('Не получается соединиться 😢 Проверьте код и интернет у обоих, и что комната ещё открыта');
+  }, 60000);
+}
+
 function reconnectGuest(attempt) {
-  if (net.connected || attempt > 15 || !net.peer || net.peer.destroyed) return;
-  if (net.peer.disconnected) net.peer.reconnect();
-  setupConn(net.peer.connect(CFG.roomPrefix + net.code, { reliable: true }));
-  setTimeout(() => reconnectGuest(attempt + 1), 4000);
+  if (net.connected || attempt > 40) return;
+  if (useP2P() && net.peer && !net.peer.destroyed) {
+    if (net.peer.disconnected) net.peer.reconnect();
+    else setupConn(net.peer.connect(CFG.roomPrefix + net.code, { reliable: true }));
+  }
+  if (net.relay) relaySend({ t: 'knock' });
+  setTimeout(() => reconnectGuest(attempt + 1), 3000);
 }
 setInterval(() => {
   if (!net.connected) return;
   net.send({ t: 'hb' });
-  if (now() - net.lastRecv > 20) dropConn(net.conn);
+  if (now() - net.lastRecv > 20) linkDown();
 }, 1000);
-window.addEventListener('pagehide', () => { if (net.conn) try { net.conn.close(); } catch { /* ignore */ } });
+window.addEventListener('pagehide', () => {
+  if (net.connected) net.send({ t: 'bye' });
+  if (net.conn) try { net.conn.close(); } catch { /* ignore */ }
+});
 
 function onNetData(m) {
   if (!m || typeof m !== 'object') return;
@@ -1494,6 +1629,9 @@ function onNetData(m) {
       break;
     case 'full':
       toast('В комнате уже двое 🙈');
+      break;
+    case 'bye':
+      linkDown();
       break;
   }
 }
@@ -1637,7 +1775,7 @@ function updateRoomInfo() {
   const el = $('#room-info');
   if (state.mode === 'solo') { el.innerHTML = '🚶 Прогулка в одиночку'; return; }
   const on = net.connected;
-  el.innerHTML = `<span class="dot ${on ? 'on' : ''}"></span>${on ? 'Вы вдвоём 💕' : 'Ждём партнёра…'} · код <b>${net.code}</b>` + (on ? '' : '<br><button id="copy-link">📋 Скопировать приглашение</button><br><small>Не сворачивайте игру, пока партнёр входит</small>');
+  el.innerHTML = `<span class="dot ${on ? 'on' : ''}"></span>${on ? 'Вы вдвоём 💕' + (net.via === 'relay' ? ' <small>(через сервер)</small>' : '') : 'Ждём партнёра…'} · код <b>${net.code}</b>` + (on ? '' : '<br><button id="copy-link">📋 Скопировать приглашение</button><br><small>Не сворачивайте игру, пока партнёр входит</small>');
   const cb = $('#copy-link');
   if (cb) cb.addEventListener('click', async () => {
     const text = `Заходи ко мне в нашу галерею 💕 Код: ${net.code}\n${inviteLink()}`;
@@ -1693,12 +1831,17 @@ $('#btn-join').addEventListener('click', () => {
     done = true;
     setMenuBusy(false);
     menuStatus(err, true);
+    net.code = '';
     if (net.peer) net.peer.destroy();
+    relayClose();
   });
+  const t0 = now();
   const wait = setInterval(() => {
     if (done) { clearInterval(wait); return; }
-    if (net.connected) { done = true; clearInterval(wait); setMenuBusy(false); menuStatus(''); startGame('guest'); }
-  }, 100);
+    if (net.connected) { done = true; clearInterval(wait); setMenuBusy(false); menuStatus(''); startGame('guest'); return; }
+    const sec = Math.floor(now() - t0);
+    if (sec >= 5) menuStatus(`Подключаемся… ${sec} с${sec >= 8 ? ' (пробуем через сервер)' : ''}`);
+  }, 250);
 });
 codeEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-join').click(); });
 
