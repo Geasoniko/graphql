@@ -1329,7 +1329,12 @@ document.addEventListener('visibilitychange', () => {
 // ---------- relay (MQTT over WebSocket) ----------
 // A tiny MQTT 3.1.1 client (QoS 0 only) instead of a library: plain old JavaScript, so it also runs
 // on older iPhones, and nothing else is needed for publish / subscribe.
-const RELAY_BROKERS = CFG.relayBrokers || ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://test.mosquitto.org:8081'];
+const RELAY_BROKERS = CFG.relayBrokers || [
+  'wss://mqtt.eclipseprojects.io:443/mqtt', // the usual HTTPS port: gets through strict networks
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt',
+];
 const hexOf = (buf) => Array.prototype.map.call(new Uint8Array(buf), (b) => (b < 16 ? '0' : '') + b.toString(16)).join('');
 const sha = (text) => crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
 function bytesConcat(parts) {
@@ -1401,41 +1406,50 @@ function mqttConnect(url, onMessage) {
     ws.onerror = down;
   });
 }
+// Connect to every broker at once and publish through all of them: one network may block a broker's
+// port that the other network allows, and both players only need one broker in common.
 async function relayOpen(code) {
   if (!window.WebSocket || !window.crypto || !crypto.subtle || !window.TextEncoder) return null;
   const key = await crypto.subtle.importKey('raw', await sha('nasha-galereya|key|' + code), 'AES-GCM', false, ['encrypt', 'decrypt']);
   const topic = 'nasha-galereya/v1/' + hexOf(await sha('nasha-galereya|topic|' + code)).slice(0, 32);
-  for (const url of RELAY_BROKERS) {
-    if (net.code !== code) return null;
-    const relay = { client: null, key, topic, url, partner: null, chain: Promise.resolve() };
-    const onMessage = (payload) => relayReceive(relay, payload);
-    const client = await mqttConnect(url, onMessage);
-    if (!client) continue;
-    if (net.code !== code) { client.end(); return null; }
-    const attach = (c) => {
-      relay.client = c;
-      c.subscribe(topic);
-      // keep the link alive: reconnect to the same broker if it drops
-      c.onclose = () => {
-        const retry = async () => {
-          if (net.relay !== relay) return;
-          const again = await mqttConnect(url, onMessage);
-          if (again && net.relay === relay) attach(again);
-          else if (net.relay === relay) setTimeout(retry, 3000);
-        };
-        setTimeout(retry, 1500);
+  if (net.code !== code) return null;
+  const relay = { clients: [], key, topic, partner: null, chain: Promise.resolve(), seq: 0, seen: new Map() };
+  const onMessage = (payload) => relayReceive(relay, payload);
+  const alive = () => net.code === code && (!net.relay || net.relay === relay);
+  const attach = (url, c) => {
+    relay.clients.push(c);
+    c.subscribe(topic);
+    // keep the link alive: reconnect to the same broker if it drops
+    c.onclose = () => {
+      relay.clients = relay.clients.filter((x) => x !== c);
+      const retry = async () => {
+        if (!alive()) return;
+        const again = await mqttConnect(url, onMessage);
+        if (again && alive()) attach(url, again);
+        else if (again) again.end();
+        else if (alive()) setTimeout(retry, 4000);
       };
+      setTimeout(retry, 1500);
     };
-    attach(client);
-    net.relay = relay;
-    return relay;
-  }
-  return null;
+  };
+  return new Promise((resolve) => {
+    let pending = RELAY_BROKERS.length, done = false;
+    for (const url of RELAY_BROKERS) {
+      mqttConnect(url, onMessage).then((c) => {
+        pending--;
+        if (c && alive()) {
+          attach(url, c);
+          if (!done) { done = true; net.relay = relay; resolve(relay); }
+        } else if (c) c.end();
+        if (!pending && !done) { done = true; resolve(null); }
+      });
+    }
+  });
 }
 function relayClose() {
   const r = net.relay;
   net.relay = null;
-  if (r && r.client) try { r.client.end(); } catch { /* ignore */ }
+  if (r) for (const c of r.clients) try { c.end(); } catch { /* ignore */ }
 }
 let warnedBigPhotos = false;
 function relaySend(msg, to) {
@@ -1446,15 +1460,16 @@ function relaySend(msg, to) {
     msg = { t: 'p', list: msg.list.filter((x) => !x.startsWith('data:')) };
     if (!warnedBigPhotos) { warnedBigPhotos = true; toast('Фото с устройства не дойдут через сервер — только ссылки из Drive', 4000); }
   }
-  const body = new TextEncoder().encode(JSON.stringify({ f: net.id, to: to || r.partner || undefined, m: msg }));
+  const body = new TextEncoder().encode(JSON.stringify({ f: net.id, i: ++r.seq, to: to || r.partner || undefined, m: msg }));
   // keep messages in order: encrypt + publish one after another
   r.chain = r.chain.then(async () => {
-    if (!r.client || !r.client.connected) return;
+    const live = r.clients.filter((c) => c.connected);
+    if (!live.length) return;
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, r.key, body));
     const out = new Uint8Array(12 + ct.length);
     out.set(iv); out.set(ct, 12);
-    r.client.publish(r.topic, out);
+    for (const c of live) c.publish(r.topic, out);
   }).catch(() => {});
 }
 async function relayReceive(r, payload) {
@@ -1465,6 +1480,11 @@ async function relayReceive(r, payload) {
     env = JSON.parse(new TextDecoder().decode(pt));
   } catch { return; }
   if (!env || env.f === net.id || (env.to && env.to !== net.id)) return;
+  // the same message arrives once per broker: handle it only the first time
+  const id = env.f + ':' + env.i;
+  if (r.seen.has(id)) return;
+  r.seen.set(id, 1);
+  if (r.seen.size > 600) r.seen.delete(r.seen.keys().next().value);
   const m = env.m || {};
   if (state.mode === 'host') {
     if (m.t === 'knock') {
@@ -2256,7 +2276,7 @@ $('#btn-join').addEventListener('click', () => {
     if (done) { clearInterval(wait); return; }
     if (net.connected) { done = true; clearInterval(wait); setMenuBusy(false); menuStatus(''); startGame('guest'); return; }
     const sec = Math.floor(now() - t0);
-    if (sec >= 3) menuStatus(`Подключаемся к ${code}… ${sec} с · сервер ${net.relay ? '✓' : '…'}${sec >= 8 ? ' · ищем партнёра через сервер' : ''}`);
+    if (sec >= 3) menuStatus(`Подключаемся к ${code}… ${sec} с · сервер ${net.relay ? '✓' + net.relay.clients.length : '…'}${sec >= 8 ? ' · ищем партнёра через сервер' : ''}`);
   }, 250);
 });
 codeEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-join').click(); });
