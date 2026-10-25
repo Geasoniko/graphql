@@ -2222,7 +2222,9 @@ function menuStatus(text, error = false) {
 }
 function setMenuBusy(b) { ['#btn-host', '#btn-join', '#btn-solo'].forEach((s) => { $(s).disabled = b; }); }
 function readName() { state.myName = nameEl.value.trim().slice(0, 16); store.set('lg_name', state.myName); }
-const inviteLink = () => location.origin + location.pathname + '?room=' + net.code;
+// inside the iPhone app the page lives at nashagame://game/, which means nothing to the partner
+const PUBLIC_URL = 'https://geasoniko.github.io/graphql/game/';
+const inviteLink = () => (/^https?:$/.test(location.protocol) ? location.origin + location.pathname : PUBLIC_URL) + '?room=' + net.code;
 function updateRoomInfo() {
   const el = $('#room-info');
   if (state.mode === 'solo') { el.innerHTML = '🚶 Прогулка в одиночку'; return; }

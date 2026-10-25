@@ -1,0 +1,27 @@
+# XcodeGen spec: the GitHub workflow turns this into NashaGalereya.xcodeproj on a Mac runner.
+name: NashaGalereya
+options:
+  bundleIdPrefix: com.geasoniko
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  NashaGalereya:
+    type: application
+    platform: iOS
+    sources:
+      - path: NashaGalereya
+    settings:
+      base:
+        PRODUCT_NAME: NashaGalereya
+        PRODUCT_BUNDLE_IDENTIFIER: com.geasoniko.nashagalereya
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        # unsigned build: Sideloadly signs it with the player's own Apple ID on install
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
