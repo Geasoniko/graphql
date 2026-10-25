@@ -510,7 +510,7 @@ function updateMovie(dt) {
 // The film is drawn right on the 3D cinema screen (VideoTexture). That needs the video to be
 // same-origin or CORS-enabled; if the browser refuses, the player sits exactly over the screen instead.
 const vidSync = { until: 0, p: 0, ct: 0 };
-const filmMedia = { video: null, tex: null, mode: null };
+const filmMedia = { video: null, tex: null, mode: null, aspect: 16 / 9 };
 const fmtTime = (t) => { t = Math.max(0, Math.floor(t || 0)); const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0'); };
 const sameOrigin = (u) => { try { return u.startsWith('blob:') || new URL(u, location.href).origin === location.origin; } catch { return false; } };
 function canTexture(v) {
@@ -520,18 +520,25 @@ function canTexture(v) {
     return true;
   } catch { return false; }
 }
+// modes: texture — VideoTexture on the 3D screen; projvideo / iframe — the player is stretched in
+// perspective exactly onto the screen (used when the browser can't paint the video into 3D)
 function setFilmMode(mode) {
   filmMedia.mode = mode;
   const el = $('#film');
-  el.classList.toggle('tex', mode === 'texture');
-  el.classList.toggle('boxed', mode !== 'texture');
+  el.classList.toggle('tex', mode === 'texture' || mode === 'projvideo');
+  el.classList.toggle('proj', mode === 'iframe');
+  el.classList.toggle('boxed', !['texture', 'projvideo', 'iframe'].includes(mode));
 }
 function clearFilmMedia() {
   const { video, tex } = filmMedia;
   if (video) { video.pause(); video.removeAttribute('src'); video.load(); video.remove(); }
   if (tex) tex.dispose();
-  filmMedia.video = null; filmMedia.tex = null; filmMedia.mode = null;
+  filmMedia.video = null; filmMedia.tex = null; filmMedia.mode = null; filmMedia.aspect = 16 / 9;
   $('#film-body').innerHTML = '';
+  const proj = $('#film-proj');
+  proj.innerHTML = '';
+  proj.removeAttribute('style');
+  proj.classList.remove('full');
 }
 function filmSources(film) {
   const m = MOVIES[film] || {};
@@ -565,7 +572,7 @@ function filmEmbed(film) {
     f.src = id ? `https://drive.google.com/file/d/${id}/preview` : `https://www.youtube.com/embed/${yt[1]}?autoplay=1&rel=0`;
     f.allow = 'autoplay; fullscreen; encrypted-media';
     f.allowFullscreen = true;
-    $('#film-body').appendChild(f);
+    $('#film-proj').appendChild(f);
     return;
   }
   setFilmMode('loading');
@@ -595,13 +602,14 @@ function filmEmbed(film) {
       const tex = new THREE.VideoTexture(v);
       tex.colorSpace = THREE.SRGBColorSpace;
       filmMedia.tex = tex;
+      filmMedia.aspect = v.videoWidth / v.videoHeight || 16 / 9;
       world.cinema.showVideo(tex, v.videoWidth, v.videoHeight);
       setFilmMode('texture');
     } else {
-      v.controls = true;
-      $('#film-body').appendChild(v);
+      filmMedia.aspect = v.videoWidth / v.videoHeight || 16 / 9;
+      $('#film-proj').appendChild(v);
       world.cinema.setScreenText(' ', '#000000');
-      setFilmMode('overlay');
+      setFilmMode('projvideo');
     }
   });
   // keep both players on the same frame: play / pause / seek are mirrored
@@ -642,16 +650,64 @@ function playFilm(film) {
   filmEmbed(film);
   setMusic(null);
 }
+// ---- perspective mapping of an HTML element onto 4 screen points (homography → matrix3d) ----
+const adj3 = (m) => [
+  m[4] * m[8] - m[5] * m[7], m[2] * m[7] - m[1] * m[8], m[1] * m[5] - m[2] * m[4],
+  m[5] * m[6] - m[3] * m[8], m[0] * m[8] - m[2] * m[6], m[2] * m[3] - m[0] * m[5],
+  m[3] * m[7] - m[4] * m[6], m[1] * m[6] - m[0] * m[7], m[0] * m[4] - m[1] * m[3],
+];
+function mul3(a, b) {
+  const c = new Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) c[3 * i + j] = a[3 * i] * b[j] + a[3 * i + 1] * b[3 + j] + a[3 * i + 2] * b[6 + j];
+  return c;
+}
+const mulv3 = (m, v) => [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]];
+function basisToPoints(p) {
+  const m = [p[0][0], p[1][0], p[2][0], p[0][1], p[1][1], p[2][1], 1, 1, 1];
+  const v = mulv3(adj3(m), [p[3][0], p[3][1], 1]);
+  return mul3(m, [v[0], 0, 0, 0, v[1], 0, 0, 0, v[2]]);
+}
+// pts: top-left, top-right, bottom-left, bottom-right (px)
+function mapElementTo(el, w, h, pts) {
+  const t = mul3(basisToPoints(pts), adj3(basisToPoints([[0, 0], [w, 0], [0, h], [w, h]])));
+  for (let i = 0; i < 9; i++) t[i] /= t[8];
+  el.style.transform = `matrix3d(${[t[0], t[3], 0, t[6], t[1], t[4], 0, t[7], 0, 0, 1, 0, t[2], t[5], 0, t[8]].join(',')})`;
+}
+const PROJ_W = 1280;
+const _corners = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 const _v = new THREE.Vector3();
+// the film's rectangle on the 3D screen (letterboxed), projected to screen pixels
+function filmPoints() {
+  const scr = world.cinema.screen;
+  const { SW, SH } = world.cinema.size;
+  const aspect = filmMedia.aspect || 16 / 9;
+  let pw = SW, ph = SW / aspect;
+  if (ph > SH) { ph = SH; pw = SH * aspect; }
+  const fx = Math.min(1, pw / scr.scale.x) / 2, fy = Math.min(1, ph / scr.scale.y) / 2;
+  scr.updateMatrixWorld();
+  camera.updateMatrixWorld(); // use this frame's camera, not last frame's
+  return [[-fx, fy], [fx, fy], [-fx, -fy], [fx, -fy]].map(([x, y], i) => {
+    _v.copy(scr.localToWorld(_corners[i].set(x, y, 0))).project(camera);
+    return [(_v.x * 0.5 + 0.5) * window.innerWidth, (-_v.y * 0.5 + 0.5) * window.innerHeight];
+  });
+}
 function positionFilm() {
-  const el = $('#film');
-  if (el.classList.contains('full')) { el.removeAttribute('style'); return; }
-  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-  for (const c of world.cinema.corners) {
-    _v.copy(c).project(camera);
-    const x = (_v.x * 0.5 + 0.5) * window.innerWidth, y = (-_v.y * 0.5 + 0.5) * window.innerHeight;
-    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  const el = $('#film'), proj = $('#film-proj');
+  const full = el.classList.contains('full');
+  const pts = filmPoints();
+  if (proj.firstChild) {
+    proj.classList.toggle('full', full);
+    if (full) proj.removeAttribute('style');
+    else {
+      const w = PROJ_W, h = Math.round(PROJ_W / (filmMedia.aspect || 16 / 9));
+      proj.style.width = w + 'px';
+      proj.style.height = h + 'px';
+      mapElementTo(proj, w, h, pts);
+    }
   }
+  if (full) { el.removeAttribute('style'); return; }
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const [x, y] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   x0 = Math.max(0, x0); y0 = Math.max(0, y0);
   x1 = Math.min(window.innerWidth, x1); y1 = Math.min(window.innerHeight - 56, y1);
   el.style.left = x0 + 'px';
@@ -670,12 +726,12 @@ function stopMovie() {
 }
 const togglePlay = () => { const v = filmMedia.video; if (v) { if (v.paused) v.play().catch(() => {}); else v.pause(); } };
 $('#film-play').onclick = togglePlay;
-$('#film-body').addEventListener('click', () => { if (filmMedia.mode === 'texture') togglePlay(); });
+$('#film-body').addEventListener('click', () => { if (filmMedia.mode === 'texture' || filmMedia.mode === 'projvideo') togglePlay(); });
 $('#film-seek').addEventListener('input', (e) => { const v = filmMedia.video; if (v && v.duration) v.currentTime = (e.target.value / 1000) * v.duration; });
 $('#film-mute').onclick = () => { const v = filmMedia.video; if (v) { v.muted = !v.muted; renderFilmBar(); } };
 $('#film-full').onclick = () => {
   const v = filmMedia.video;
-  if (filmMedia.mode === 'texture' && v) {
+  if ((filmMedia.mode === 'texture' || filmMedia.mode === 'projvideo') && v) {
     // native fullscreen player; when it closes the film keeps playing on the cinema screen
     if (v.requestFullscreen) v.requestFullscreen().catch(() => {});
     else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
@@ -1661,4 +1717,4 @@ if (CFG.driveFolder && driveFolderId(CFG.driveFolder)) {
 }
 
 // for debugging in the console
-window.__game = { state, net, setPhotos, doEmote, startGame, buy, sitCinema, openShop, openInv, openKassa, get world() { return world; } };
+window.__game = { state, net, setPhotos, doEmote, startGame, buy, sitCinema, openShop, openInv, openKassa, filmMedia, get world() { return world; } };

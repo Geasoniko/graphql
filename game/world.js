@@ -408,7 +408,7 @@ export function buildWorld({ scene, photos, maxAniso = 4, title = 'Наша ис
     box(basicMat(0xffc98a), x, 3.2, C.z1 - 0.2, 0.3, 0.45, 0.06);
   }
   // screen
-  const SW = 12.6, SH = 5.6, SY = 3.9, SX = C.x1 - 0.25;
+  const SW = 12.6, SH = 5.6, SY = 3.7, SX = C.x1 - 0.25;
   box(basicMat(0x050505), SX + 0.05, SY, 12, 0.1, SH + 0.4, SW + 0.4);
   const screenTex = textTexture('🎬 Купите билет в кассе', { w: 1024, h: 460, font: 'bold 64px system-ui, sans-serif', color: '#ffffff', bg: '#1b1220', glow: 'rgba(255,100,160,0.8)' });
   screenTex.userData.owned = true;
@@ -419,7 +419,7 @@ export function buildWorld({ scene, photos, maxAniso = 4, title = 'Наша ис
   for (const zc of [12 - SW / 2 - 0.9, 12 + SW / 2 + 0.9]) {
     for (let i = 0; i < 5; i++) addMesh(root, GEO.cyl, curtMat, SX - 0.2, C.h / 2, zc - 0.6 + i * 0.3, 0.17, C.h, 0.17);
   }
-  box(curtMat, SX - 0.2, C.h - 0.4, 12, 0.3, 0.8, SW + 3.6);
+  box(curtMat, SX - 0.2, C.h - 0.2, 12, 0.3, 0.4, SW + 3.6); // valance stays above the screen
   // seats (instanced)
   const seatCount = C.rows * C.cols;
   const seatBase = new THREE.InstancedMesh(GEO.box, stdMat(0xb3123a, 0.8), seatCount);
@@ -449,7 +449,7 @@ export function buildWorld({ scene, photos, maxAniso = 4, title = 'Наша ис
   }
   W.cinema = {
     bounds: { x0: C.x0, x1: C.x1, z0: C.z0, z1: C.z1 },
-    screen, screenMat,
+    screen, screenMat, size: { SW, SH },
     corners: [
       new THREE.Vector3(SX - 0.02, SY - SH / 2, 12 - SW / 2), new THREE.Vector3(SX - 0.02, SY + SH / 2, 12 - SW / 2),
       new THREE.Vector3(SX - 0.02, SY - SH / 2, 12 + SW / 2), new THREE.Vector3(SX - 0.02, SY + SH / 2, 12 + SW / 2),
