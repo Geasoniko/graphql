@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TubeFactory</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><div class="logo">T</div>TubeFactory</div>
+      <nav class="nav">
+        <div class="nav-title">Основное</div>
+        <a href="#/home" data-page="home">🏠 Главная</a>
+        <a href="#/scenarist" data-page="scenarist">✨ AI-сценарист</a>
+        <a href="#/projects" data-page="projects">🎬 Проекты <span class="badge" id="nav-projects">0</span></a>
+        <a href="#/queue" data-page="queue">⏳ Очередь <span class="badge" id="nav-queue">0</span></a>
+        <div class="nav-title">Инструменты</div>
+        <a href="#/channels" data-page="channels">📺 Каналы <span class="badge" id="nav-channels">0</span></a>
+        <a href="#/niches" data-page="niches">🔎 Поиск ниш</a>
+        <a href="#/settings" data-page="settings">⚙️ Настройки</a>
+      </nav>
+      <div class="foot" id="foot"></div>
+    </aside>
+    <main class="main" id="view"></main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
