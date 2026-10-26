@@ -144,8 +144,8 @@ def generate_image(prompt, references=(), aspect="16:9", model=None, role="illus
     raise LLMError(f"Модель не вернула картинку: {str(msg.get('content'))[:300]}")
 
 
-def list_models():
-    r = requests.get(f"{API}/models", timeout=30)
+def list_models(timeout=30):
+    r = requests.get(f"{API}/models", timeout=timeout)
     r.raise_for_status()
     out = []
     for m in r.json()["data"]:
@@ -156,6 +156,7 @@ def list_models():
             "input": arch.get("input_modalities", []),
             "output": arch.get("output_modalities", []),
             "prompt_price": m.get("pricing", {}).get("prompt"),
+            "completion_price": m.get("pricing", {}).get("completion"),
             "image_price": m.get("pricing", {}).get("image"),
         })
     return out

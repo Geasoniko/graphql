@@ -1,13 +1,17 @@
 """Company office: activity feed of the agents, spending per agent, the
 analyst's reports and the director's decisions (data/company.json)."""
+import contextvars
 import datetime as dt
 import json
 import threading
 import time
+from contextlib import contextmanager
 
 from .config import DATA
 
 _lock = threading.RLock()
+# Where the cost of the current work is also booked (e.g. the project being made).
+_sink = contextvars.ContextVar("cost_sink", default=None)
 _FILE = DATA / "company.json"
 
 
@@ -41,6 +45,20 @@ def add_cost(role, cost):
         data["costs"][role] = round(data["costs"].get(role, 0) + (cost or 0), 6)
         data["calls"][role] = data["calls"].get(role, 0) + 1
         _save(data)
+    sink = _sink.get()
+    if sink:
+        sink(role, cost or 0)
+
+
+@contextmanager
+def booking(sink):
+    """Inside this block every OpenRouter cost is also passed to sink(role, cost).
+    Worker threads need contextvars.copy_context().run to inherit it."""
+    token = _sink.set(sink)
+    try:
+        yield
+    finally:
+        _sink.reset(token)
 
 
 def set_report(channel_id, report):

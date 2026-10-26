@@ -79,7 +79,19 @@ def _worker():
 # ---------- director + autopilot ----------
 
 def plan_video(channel_id, start=True, ideas=None):
-    """Planning meeting: researcher brings ideas, director picks one, the team starts."""
+    """Planning meeting: researcher brings ideas, director picks one, the team starts.
+    What the meeting cost is booked to the project it creates."""
+    spent = []
+    with company.booking(lambda role, cost: spent.append((role, cost))):
+        project = _plan_video(channel_id, ideas)
+    for role, cost in spent:
+        storage.add_cost(project["id"], role, cost)
+    if start:
+        enqueue(project["id"])
+    return storage.get_project(project["id"])
+
+
+def _plan_video(channel_id, ideas):
     ch = storage.get_channel(channel_id)
     projects = [p for p in storage.list_projects() if p["channel_id"] == channel_id]
     titles = [p["title"] for p in projects]
@@ -108,8 +120,6 @@ def plan_video(channel_id, start=True, ideas=None):
         publish_at=company.next_publish_time(hours, made_today) if connected and ch.get("autopilot") else None)
     with storage.edit_project(project["id"]) as p:
         p["director"] = plan
-    if start:
-        enqueue(project["id"])
     return project
 
 

@@ -3,6 +3,7 @@ writer -> chief editor -> art director -> marketer + SEO tagger -> illustrator
 (characters, frames) -> voice -> banner designer -> editor-animator -> publisher.
 Every stage can also be re-run alone, and scenes that are already done are
 skipped, so a failed run resumes."""
+import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import company, images, scenarist, storage, team, tts, video, youtube
@@ -208,7 +209,8 @@ def stage_images(pid, force=False):
         for i in todo:
             with edit_project(pid) as p2:
                 p2["script"]["scenes"][i]["status"] = "running"
-            futures[pool.submit(_scene_image, pid, i)] = i
+            # copy_context: the worker thread books its cost to this project too.
+            futures[pool.submit(contextvars.copy_context().run, _scene_image, pid, i)] = i
         for f in as_completed(futures):
             i = futures[f]
             try:
@@ -333,6 +335,11 @@ STAGE_FUNCS = {
 
 
 def run(pid, stage="all", force=False):
+    with company.booking(lambda role, cost: storage.add_cost(pid, role, cost)):
+        _run(pid, stage, force)
+
+
+def _run(pid, stage, force):
     order = list(STAGE_FUNCS) if stage == "all" else [stage]
     p = get_project(pid)
     if stage == "all" and not p["auto_upload"]:
@@ -352,10 +359,11 @@ def run(pid, stage="all", force=False):
 
 
 def regenerate_scene(pid, idx, what):
-    if what in ("image", "both"):
-        _scene_image(pid, idx)
-    if what in ("audio", "both"):
-        _scene_audio(pid, idx, get_project(pid)["voice"])
+    with company.booking(lambda role, cost: storage.add_cost(pid, role, cost)):
+        if what in ("image", "both"):
+            _scene_image(pid, idx)
+        if what in ("audio", "both"):
+            _scene_audio(pid, idx, get_project(pid)["voice"])
     with edit_project(pid) as p:
         # The rendered video no longer matches the scenes.
         if p["stages"]["render"]["status"] == "done":

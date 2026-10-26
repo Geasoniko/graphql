@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agents, analytics, company, config, jobs, llm, pipeline, scenarist, storage, tts, youtube
+from . import agents, analytics, company, config, jobs, llm, pipeline, pricing, scenarist, storage, tts, youtube
 from .config import WEB
 
 
@@ -150,6 +150,18 @@ def check_agents():
     return out
 
 
+@app.post("/api/agents/reset")
+def reset_agents():
+    """Back to the recommended lineup (quality per dollar)."""
+    config.save_settings({"agents": {}})
+    return agents.staff()
+
+
+@app.get("/api/estimate")
+def estimate(scenes: int = 20, characters: int = 2):
+    return pricing.estimate(scenes, characters)
+
+
 @app.post("/api/channels/{cid}/plan")
 def plan(cid: str, body: dict = Body(default={})):
     try:
@@ -211,7 +223,7 @@ def projects():
     for p in storage.list_projects():
         sc = p.get("script") or {}
         out.append({k: p.get(k) for k in ("id", "title", "channel_id", "stages", "output",
-                                          "thumbnail", "youtube", "created_at", "duration")}
+                                          "thumbnail", "youtube", "created_at", "duration", "cost")}
                    | {"scenes": len(sc.get("scenes", [])), "busy": jobs.is_busy(p["id"])})
     return out
 
@@ -231,6 +243,10 @@ def create_project(body: dict = Body(...)):
 def project(pid: str):
     p = _project(pid)
     p["busy"] = jobs.is_busy(pid)
+    sc = p.get("script") or {}
+    scenes = len(sc.get("scenes") or []) or p["scene_count"]
+    p["estimate"] = pricing.estimate(scenes, len(sc.get("characters") or []) or 2,
+                                     planned=bool(p.get("director")))
     return p
 
 

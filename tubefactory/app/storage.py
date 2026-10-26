@@ -132,6 +132,16 @@ def log(pid, message, role=None):
         p["log"] = p["log"][-300:]
 
 
+def add_cost(pid, role, cost):
+    """Money spent on this video, in total and per agent."""
+    if not cost:
+        return
+    with edit_project(pid) as p:
+        c = p.setdefault("cost", {"total": 0, "by_role": {}})
+        c["total"] = round(c["total"] + cost, 6)
+        c["by_role"][role] = round(c["by_role"].get(role, 0) + cost, 6)
+
+
 def set_stage(pid, stage, **fields):
     with edit_project(pid) as p:
         p["stages"][stage].update(fields)

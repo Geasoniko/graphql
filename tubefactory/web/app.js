@@ -63,6 +63,33 @@ function voiceOptions(value) {
   return options(known || !value ? list : [{ id: value, name: value }, ...list], value);
 }
 
+const money = (v) => "$" + (v || 0).toFixed(v && v < 0.1 ? 3 : 2);
+
+function agentName(role) {
+  const a = (cache.company?.staff || []).find((x) => x.role === role);
+  return a ? `${a.emoji} ${a.name}` : role;
+}
+
+function costCard(p) {
+  const spent = p.cost?.total || 0;
+  const est = p.estimate || { total: 0, by_role: {} };
+  const roles = [...new Set([...Object.keys(est.by_role), ...Object.keys(p.cost?.by_role || {})])];
+  const pct = est.total ? Math.min(100, Math.round(spent / est.total * 100)) : 0;
+  return `<div class="card">
+    <div class="row"><h2 class="grow" style="margin:0">💰 Деньги на это видео</h2>
+      <div class="col" style="align-items:flex-end;gap:0"><div class="stat">${money(spent)}</div>
+      <div class="muted small">потрачено · оценка всего видео ~${money(est.total)}${est.live_prices ? "" : " (цены по справочнику)"}</div></div></div>
+    <div class="bar ${spent > est.total * 1.2 && est.total ? "err" : "ok"}" style="margin:10px 0"><div style="width:${pct}%"></div></div>
+    <details><summary class="small muted">По сотрудникам</summary>
+      <table class="small" style="width:100%;margin-top:8px;border-collapse:collapse">
+        <tr class="muted"><td>Сотрудник</td><td style="text-align:right">Потрачено</td><td style="text-align:right">Оценка</td></tr>
+        ${roles.map((r) => `<tr><td>${esc(agentName(r))}</td><td style="text-align:right">${money(p.cost?.by_role?.[r])}</td><td style="text-align:right" class="muted">${money(est.by_role[r])}</td></tr>`).join("")}
+      </table>
+      <div class="muted small" style="margin-top:6px">Озвучка Edge и монтаж бесплатны. Перерисовка кадров добавляет к сумме.</div>
+    </details>
+  </div>`;
+}
+
 function lightbox(src) {
   const el = document.createElement("div");
   el.className = "lightbox";
@@ -72,10 +99,10 @@ function lightbox(src) {
 }
 
 async function refreshShared() {
-  const [channels, voices, settings, projects, queue] = await Promise.all([
-    api("/api/channels"), api("/api/voices"), api("/api/settings"), api("/api/projects"), api("/api/queue"),
+  const [channels, voices, settings, projects, queue, company] = await Promise.all([
+    api("/api/channels"), api("/api/voices"), api("/api/settings"), api("/api/projects"), api("/api/queue"), api("/api/company"),
   ]);
-  cache = { channels, voices, settings, projects, queue };
+  cache = { channels, voices, settings, projects, queue, company };
   $("#nav-channels").textContent = channels.length;
   $("#nav-projects").textContent = projects.length;
   $("#nav-queue").textContent = queue.queued.length + (queue.current ? 1 : 0);
@@ -100,6 +127,8 @@ pages.home = async () => {
       <div class="card"><div class="muted">Готовых видео</div><div class="stat">${ready}</div></div>
       <div class="card"><div class="muted">Загружено на YouTube</div><div class="stat">${uploaded}</div></div>
       <div class="card"><div class="muted">Каналов / на автопилоте</div><div class="stat">${channels.length} / ${channels.filter((c) => c.autopilot).length}</div></div>
+      <div class="card"><div class="muted">Потрачено на OpenRouter</div><div class="stat">${money(cache.company.total_cost)}</div></div>
+      <div class="card"><div class="muted">В среднем за готовое видео</div><div class="stat">${ready ? money(projects.filter((p) => p.output).reduce((a, p) => a + (p.cost?.total || 0), 0) / ready) : "—"}</div></div>
     </div>
     <div class="card">
       <div class="row"><h2 class="grow">Быстрый старт</h2></div>
@@ -133,7 +162,7 @@ function projectCard(p) {
   return `<div class="card project-card" onclick="location.hash='#/project/${p.id}'">
     <div class="thumb" style="background-image:url('${media(p.id, p.thumbnail)}')"></div>
     <div class="body"><h3>${esc(p.title)}</h3>
-      <div class="row small muted">${status}<span>${p.scenes} сцен</span>${p.duration ? `<span>${(p.duration / 60).toFixed(1)} мин</span>` : ""}${ch ? `<span>📺 ${esc(ch.name)}</span>` : ""}</div>
+      <div class="row small muted">${status}<span>${p.scenes} сцен</span>${p.cost?.total ? `<span>💰 ${money(p.cost.total)}</span>` : ""}${p.duration ? `<span>${(p.duration / 60).toFixed(1)} мин</span>` : ""}${ch ? `<span>📺 ${esc(ch.name)}</span>` : ""}</div>
     </div></div>`;
 }
 
@@ -261,6 +290,8 @@ function renderProject(p, keepScroll = false) {
         </div>`).join("")}</div>
     </div>
 
+    ${costCard(p)}
+
     <details class="card" ${sc ? "" : "open"}>
       <summary><b>Настройки проекта</b></summary>
       <div class="form" style="margin-top:12px">
@@ -268,7 +299,7 @@ function renderProject(p, keepScroll = false) {
         <label>Канал<select id="f-channel_id">${chOptions}</select></label>
         <label>Язык озвучки<select id="f-language">${options(LANGUAGES, p.language)}</select></label>
         <label>Голос<select id="f-voice">${voiceOptions(p.voice)}</select></label>
-        <label>Кол-во сцен<input id="f-scene_count" type="number" min="1" max="200" value="${p.scene_count}"></label>
+        <label>Кол-во сцен <span id="f-est" class="badge">~${money(p.estimate?.total)}</span><input id="f-scene_count" type="number" min="1" max="200" value="${p.scene_count}"></label>
         <label>Ритм кадров<select id="f-pacing">${options([["calm", "Спокойный: кадр на 2-4 фразы"], ["dynamic", "Динамичный: кадр на каждую фразу"]], p.pacing)}</select></label>
         <label>Формат<select id="f-aspect">${options([["16:9", "16:9 — обычное видео"], ["9:16", "9:16 — Shorts"]], p.aspect)}</select></label>
         <label>Доступ на YouTube<select id="f-privacy">${options([["private", "Приватное"], ["unlisted", "По ссылке"], ["public", "Публичное"]], p.privacy)}</select></label>
@@ -382,6 +413,10 @@ function bindProject(p) {
     toast("Сохранено"); await reload();
   }, e.target);
   $$("[data-tab]").forEach((b) => b.onclick = () => { projectTab = b.dataset.tab; renderProject(p, true); });
+  $("#f-scene_count").oninput = async (e) => {
+    const est = await api(`/api/estimate?scenes=${+e.target.value || 1}`).catch(() => null);
+    if (est) $("#f-est").textContent = "~" + money(est.total);
+  };
   $$("[data-zoom]").forEach((el) => el.dataset.zoom && $("img", el) && (el.onclick = () => lightbox(el.dataset.zoom)));
   $$("[data-play]").forEach((b) => b.onclick = () => new Audio(b.dataset.play).play());
   $$("[data-regen]").forEach((b) => b.onclick = () => guard(async () => {
@@ -431,7 +466,8 @@ pages.company = async () => {
     view.innerHTML = `
       <div class="card row"><div class="col grow"><h1>🏢 Компания</h1>
         <div class="muted">Каждый сотрудник — отдельная ИИ-модель OpenRouter, лучшая в своём деле. Директор решает, что снимать, аналитик следит за просмотрами.</div></div>
-        <div class="col" style="align-items:flex-end"><div class="muted small">Потрачено всего</div><div class="stat">$${c.total_cost.toFixed(2)}</div></div></div>
+        <div class="col" style="align-items:flex-end"><div class="muted small">Потрачено всего</div><div class="stat">${money(c.total_cost)}</div>
+          <div class="muted small" id="c-est"></div></div></div>
 
       <div class="card row">
         <h2 class="grow" style="margin:0">👔 Планёрка</h2>
@@ -440,6 +476,7 @@ pages.company = async () => {
         <button class="btn" id="c-analyze" ${cache.channels.length ? "" : "disabled"}>📊 Отчёт аналитика</button>
         <button class="btn sm" id="c-models">Загрузить список моделей</button>
         <button class="btn sm" id="c-check">✅ Проверить модели</button>
+        <button class="btn sm" id="c-reset">⭐ Рекомендованные модели</button>
       </div>
 
       ${Object.entries(byDept).map(([dept, list]) => `
@@ -470,6 +507,7 @@ pages.company = async () => {
 
       <div class="card"><h2>💬 Лента компании</h2><div class="log" id="c-feed">${feedText(c)}</div></div>`;
     bindCompany();
+    api("/api/estimate?scenes=30").then((e) => $("#c-est") && ($("#c-est").textContent = `видео на 30 сцен ≈ ${money(e.total)}`)).catch(() => {});
   };
   const feedText = (c) => c.feed.map((f) => {
     const a = c.staff.find((x) => x.role === f.role);
@@ -501,6 +539,10 @@ pages.company = async () => {
         if (el) el.innerHTML = r.ok ? `<span class="badge ok">есть в OpenRouter</span>` : `<span class="badge err">не найдена — выберите другую</span>`;
       }
       toast(bad ? `Не найдено моделей: ${bad}. Сначала сохраните изменения, потом проверьте снова.` : "Все модели есть в OpenRouter");
+    }, e.target);
+    $("#c-reset").onclick = (e) => confirm("Поставить всем сотрудникам рекомендованные модели (качество за свои деньги)?") && guard(async () => {
+      await api("/api/agents/reset", { body: {} });
+      toast("Готово: стоят рекомендованные модели"); await draw();
     }, e.target);
     $("#c-save").onclick = (e) => guard(async () => {
       const body = {};
