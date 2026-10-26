@@ -20,6 +20,14 @@ async def lifespan(_app):
 app = FastAPI(title="TubeFactory", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def no_cache(request, call_next):
+    # After an update the browser must load the new page, not a cached old one.
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 def _project(pid):
     try:
         return storage.get_project(pid)
