@@ -25,20 +25,30 @@ def _script_text(script, limit=40000):
 
 # ---------- chief editor ----------
 
-def review_script(script, idea, language):
+def review_script(script, idea, language, channel_titles=()):
     system = """You are the chief editor of a YouTube studio whose faceless videos get millions of views.
 Review the script brutally but fairly: the hook in the first 5 seconds, open loops and retention,
 pacing, clarity, factual accuracy (flag invented statistics), emotional payoff, ending with a reason to
-watch the next video. Reply in JSON only; feedback text in Russian, fixes in English."""
+watch the next video.
+Also guard monetization. Since July 2026 YouTube does not pay for "inauthentic content": videos that
+feel templated or interchangeable with the channel's other videos (only topic/title/names change),
+and AI personas giving health, finance or legal advice. Score originality against the channel's
+previous videos and demand real substance: specific facts, a unique angle, a story only this video tells.
+Reply in JSON only; feedback text in Russian, fixes in English."""
+    history = "\n".join(f"- {t}" for t in channel_titles) or "(first video of the channel)"
     user = f"""Video idea: {idea}
 Narration language: {language}
+Channel's previous videos:
+{history}
 Script:
 {_script_text(script)}
 
-JSON: {{"score": 1-10, "verdict": "коротко на русском", "strengths": ["..."], "problems": ["..."],
+JSON: {{"score": 1-10, "originality": 1-10, "verdict": "коротко на русском", "strengths": ["..."],
+"problems": ["..."], "monetization_risk": "нет / низкий / высокий — почему (рус.)",
 "fixes": "concrete instructions for the writer in English"}}"""
     return _ask("editor", system, user,
-                {"score": 9, "verdict": "Демо: сценарий принят без проверки.", "strengths": [], "problems": [], "fixes": ""})
+                {"score": 9, "originality": 9, "verdict": "Демо: сценарий принят без проверки.", "strengths": [],
+                 "problems": [], "monetization_risk": "", "fixes": ""})
 
 
 # ---------- art director ----------

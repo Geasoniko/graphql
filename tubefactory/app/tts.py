@@ -1,8 +1,9 @@
-"""Voice-over: edge-tts (free), OpenAI TTS or ElevenLabs.
+"""Voice-over: edge-tts (free), Kokoro (free, local), OpenRouter, OpenAI or ElevenLabs.
 
 synthesize() writes an mp3 and returns word timings
 [{"start": s, "end": s, "text": w}] used for subtitles. Providers without
-timings get them estimated from word length.
+timings get them from Whisper when that module is installed, otherwise
+they are estimated from word length.
 """
 import asyncio
 import os
@@ -11,6 +12,7 @@ import subprocess
 
 import requests
 
+from . import align
 from .config import is_demo, load_settings
 
 EDGE_VOICES = [
@@ -27,6 +29,16 @@ EDGE_VOICES = [
     ("kk-KZ-AigulNeural", "Қазақша — Айгүл"),
     ("es-MX-JorgeNeural", "Español — Jorge"),
     ("de-DE-ConradNeural", "Deutsch — Conrad"),
+]
+KOKORO_VOICES = [
+    ("am_michael", "Kokoro — Michael, мужской (US)"),
+    ("am_fenrir", "Kokoro — Fenrir, мужской, низкий (US)"),
+    ("am_puck", "Kokoro — Puck, мужской, живой (US)"),
+    ("bm_george", "Kokoro — George, мужской (UK)"),
+    ("bm_fable", "Kokoro — Fable, мужской, рассказчик (UK)"),
+    ("af_heart", "Kokoro — Heart, женский (US), лучший"),
+    ("af_bella", "Kokoro — Bella, женский (US)"),
+    ("bf_emma", "Kokoro — Emma, женский (UK)"),
 ]
 OPENAI_VOICES = ["onyx", "echo", "alloy", "ash", "ballad", "coral", "fable", "nova", "sage", "shimmer"]
 
@@ -70,6 +82,29 @@ def _edge(text, voice, path, rate="+0%"):
         return words
 
     return asyncio.run(run())
+
+
+_kokoro = {}
+
+
+def _kokoro_tts(text, voice, path):
+    """Local Kokoro-82M; the pipeline is loaded once per accent (a = US, b = UK)."""
+    import numpy as np
+    import soundfile as sf
+    from kokoro import KPipeline
+
+    if voice not in dict(KOKORO_VOICES):
+        voice = "am_michael"
+    lang = voice[0]
+    if lang not in _kokoro:
+        _kokoro[lang] = KPipeline(lang_code=lang)
+    chunks = [np.asarray(audio) for _, _, audio in _kokoro[lang](text, voice=voice, speed=1.0)]
+    wav = str(path) + ".wav"
+    sf.write(wav, np.concatenate(chunks), 24000)
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", wav, "-c:a", "libmp3lame", "-q:a", "2", str(path)],
+                   check=True)
+    os.remove(wav)
+    return None
 
 
 def _openrouter(text, voice, path, settings):
@@ -149,6 +184,8 @@ def synthesize(text, voice, path):
     words = None
     if is_demo(settings) and provider == "edge" and settings.get("demo_mode"):
         _demo(text, path)
+    elif provider == "kokoro":
+        words = _kokoro_tts(text, voice, path)
     elif provider == "openrouter" and settings.get("openrouter_api_key"):
         words = _openrouter(text, voice, path, settings)
     elif provider == "openai" and settings.get("openai_api_key"):
@@ -163,6 +200,11 @@ def synthesize(text, voice, path):
                 raise
             _demo(text, path)
     total = duration(path)
+    if not words and align.available():
+        try:
+            words = align.word_timings(path, text)
+        except Exception:
+            words = None  # alignment is a bonus; never fail the voice-over over it
     if not words:
         words = estimate_words(text, total)
     return words, total

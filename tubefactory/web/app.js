@@ -58,7 +58,8 @@ function options(list, value) {
 
 function voiceOptions(value) {
   const provider = cache.settings.tts_provider;
-  const list = provider === "openai" || provider === "openrouter" ? cache.voices.openai : cache.voices.edge;
+  const list = provider === "openai" || provider === "openrouter" ? cache.voices.openai
+    : provider === "kokoro" ? cache.voices.kokoro : cache.voices.edge;
   const known = list.some((v) => v.id === value);
   return options(known || !value ? list : [{ id: value, name: value }, ...list], value);
 }
@@ -327,7 +328,8 @@ function renderProject(p, keepScroll = false) {
     ${p.director || p.review ? `<div class="grid-2">
       ${p.director ? `<div class="card"><h2>👔 Решение директора</h2><div class="small pre">${esc(p.director.decision || "")}</div>
         ${p.director.notes_for_team ? `<div class="small muted" style="margin-top:6px">Команде: ${esc(p.director.notes_for_team)}</div>` : ""}</div>` : ""}
-      ${p.review ? `<div class="card"><h2>🧐 Шеф-редактор: ${esc(p.review.score)}/10${p.review.rewritten ? ' <span class="badge warn">сценарий переписан</span>' : ""}</h2>
+      ${p.review ? `<div class="card"><h2>🧐 Шеф-редактор: ${esc(p.review.score)}/10${p.review.originality ? ` · уникальность ${esc(p.review.originality)}/10` : ""}${p.review.rewritten ? ' <span class="badge warn">сценарий переписан</span>' : ""}</h2>
+        ${p.review.monetization_risk ? `<div class="small" style="margin-bottom:4px">💵 Риск для монетизации: ${esc(p.review.monetization_risk)}</div>` : ""}
         <div class="small">${esc(p.review.verdict || "")}</div>
         ${(p.review.problems || []).length ? `<div class="small muted" style="margin-top:6px">${p.review.problems.map((x) => "• " + esc(x)).join("<br>")}</div>` : ""}</div>` : ""}
     </div>` : ""}
@@ -703,16 +705,18 @@ pages.niches = async () => {
 pages.settings = async () => {
   const s = cache.settings;
   view.innerHTML = `
-    <div class="card"><h1>Настройки</h1><div class="muted">Один ключ <a href="https://openrouter.ai/keys" target="_blank">OpenRouter</a> даёт доступ к Claude, GPT, Gemini и моделям картинок.</div></div>
+    <div class="card" id="sys-box"><h2>🖥 Ноутбук и модули</h2><div class="muted small">Проверяю ноутбук…</div></div>
+    
     <div class="card form">
       <h2 class="wide">ИИ (OpenRouter)</h2>
+      <div class="wide muted small">Один ключ <a href="https://openrouter.ai/keys" target="_blank">OpenRouter</a> даёт доступ к Claude, GPT, Gemini и моделям картинок.</div>
       <label class="wide">OpenRouter API key<input id="s-openrouter_api_key" value="${esc(s.openrouter_api_key)}" placeholder="sk-or-v1-..."></label>
       <div class="wide muted small">Модели для каждого сотрудника выбираются на странице <a href="#/company">Компания</a>.</div>
       <label>Параллельных картинок<input id="s-image_workers" type="number" min="1" max="16" value="${s.image_workers}"></label>
       <label class="check"><input type="checkbox" id="s-demo_mode" ${s.demo_mode ? "checked" : ""}> Демо-режим (без ИИ, заглушки)</label>
 
       <h2 class="wide">Озвучка</h2>
-      <label>Сервис<select id="s-tts_provider">${options([["edge", "Edge TTS — бесплатно"], ["openrouter", "OpenRouter TTS (тот же ключ)"], ["openai", "OpenAI TTS"], ["elevenlabs", "ElevenLabs"]], s.tts_provider)}</select></label>
+      <label>Сервис<select id="s-tts_provider">${options([["edge", "Edge TTS — бесплатно"], ["kokoro", "Kokoro — бесплатно, на ноутбуке"], ["openrouter", "OpenRouter TTS (тот же ключ)"], ["openai", "OpenAI TTS"], ["elevenlabs", "ElevenLabs"]], s.tts_provider)}</select></label>
       <label>Модель OpenRouter TTS<input id="s-openrouter_tts_model" value="${esc(s.openrouter_tts_model)}"></label>
       <label>OpenAI API key<input id="s-openai_api_key" value="${esc(s.openai_api_key)}"></label>
       <label>ElevenLabs API key<input id="s-elevenlabs_api_key" value="${esc(s.elevenlabs_api_key)}"></label>
@@ -722,13 +726,43 @@ pages.settings = async () => {
       <label class="check"><input type="checkbox" id="s-subtitles" ${s.subtitles ? "checked" : ""}> Субтитры в видео</label>
       <label class="check"><input type="checkbox" id="s-ken_burns" ${s.ken_burns ? "checked" : ""}> Движение камеры (Ken Burns)</label>
       <label>FPS<input id="s-fps" type="number" value="${s.fps}"></label>
-      <label class="wide">Фоновая музыка (путь к mp3 на компьютере)<input id="s-background_music" value="${esc(s.background_music)}"></label>
+      <label class="wide">Фоновая музыка: путь к mp3 или к папке с треками (каждому видео — случайный)<input id="s-background_music" value="${esc(s.background_music)}" placeholder="C:\\Users\\User\\Music\\youtube"></label>
+      <div class="wide muted small">Бесплатная музыка без авторских проблем: YouTube Studio → Фонотека (Audio Library). Скачайте 10–20 спокойных треков в одну папку.</div>
       <label>Громкость музыки<input id="s-music_volume" type="number" step="0.01" value="${s.music_volume}"></label>
 
       <h2 class="wide">YouTube</h2>
       <label class="wide">Файл OAuth-клиента Google (client_secret.json)<input id="s-youtube_client_secret" value="${esc(s.youtube_client_secret)}"></label>
       <div class="wide"><button class="btn primary" id="s-save">Сохранить</button></div>
     </div>`;
+  const drawSys = async () => {
+    const r = await api("/api/system").catch(() => null);
+    if (!r || !$("#sys-box")) return false;
+    const yes = (v) => v ? '<span class="badge ok">есть</span>' : '<span class="badge err">нет</span>';
+    const installing = Object.values(r.modules).some((m) => m.install?.status === "running");
+    $("#sys-box").innerHTML = `<h2>🖥 Ноутбук и модули</h2>
+      <div class="grid stats" style="margin-bottom:12px">
+        <div><div class="muted small">Видеокарта</div><b>${r.gpu ? `${esc(r.gpu.name)} · ${r.gpu.vram_gb} ГБ` : "нет NVIDIA (работаем на процессоре)"}</b></div>
+        <div><div class="muted small">Память</div><b>${r.ram_gb ?? "?"} ГБ</b></div>
+        <div><div class="muted small">Свободно на диске</div><b>${r.disk_free_gb} ГБ</b></div>
+        <div><div class="muted small">Python / ffmpeg</div><b>${esc(r.python)}</b> ${yes(r.ffmpeg)}</div>
+      </div>
+      <div class="col">${Object.entries(r.modules).map(([k, m]) => `
+        <div class="row card" style="padding:12px;background:rgba(5,15,40,.35)">
+          <div class="col grow" style="gap:2px"><b>${esc(m.name)}</b><span class="muted small">${esc(m.about)}</span>
+            ${m.install?.status === "running" ? `<pre class="log" style="max-height:110px;margin-top:6px">${esc(m.install.log || "устанавливаю…")}</pre>` : ""}
+            ${m.install?.status === "error" ? `<pre class="log" style="max-height:110px;margin-top:6px;color:var(--err)">${esc(m.install.log)}</pre>` : ""}</div>
+          ${m.installed ? '<span class="badge ok">установлен</span>'
+            : m.install?.status === "running" ? '<div class="spinner"></div>'
+            : `<button class="btn sm primary" data-install="${k}">Установить</button>`}
+        </div>`).join("")}</div>
+      ${!r.ffmpeg ? '<div class="alert" style="margin-top:10px">Нет ffmpeg — видео не соберётся. В PowerShell: <code>winget install Gyan.FFmpeg</code>, потом перезапустите софт.</div>' : ""}`;
+    $$("[data-install]").forEach((b) => b.onclick = () => guard(async () => {
+      await api(`/api/system/install/${b.dataset.install}`, { body: {} }); drawSys();
+    }, b));
+    return installing;
+  };
+  const sysLoop = async () => { if (await drawSys()) pollTimer = setTimeout(sysLoop, 2500); };
+  sysLoop();
   $("#s-save").onclick = (e) => guard(async () => {
     const body = {};
     $$("[id^='s-']").forEach((el) => {

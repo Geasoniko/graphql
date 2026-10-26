@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agents, analytics, company, config, jobs, llm, pipeline, pricing, scenarist, storage, tts, youtube
+from . import agents, analytics, company, config, jobs, llm, pipeline, pricing, scenarist, storage, system, tts, youtube
 from .config import WEB
 
 
@@ -65,7 +65,21 @@ def models():
 @app.get("/api/voices")
 def voices():
     return {"edge": [{"id": v, "name": n} for v, n in tts.EDGE_VOICES],
+            "kokoro": [{"id": v, "name": n} for v, n in tts.KOKORO_VOICES],
             "openai": [{"id": v, "name": v} for v in tts.OPENAI_VOICES]}
+
+
+@app.get("/api/system")
+def system_report():
+    return system.report()
+
+
+@app.post("/api/system/install/{module}")
+def system_install(module: str):
+    if module not in system.MODULES:
+        raise HTTPException(404, "Нет такого модуля")
+    system.install(module)
+    return system.report()
 
 
 # ---------- channels ----------

@@ -4,9 +4,12 @@ writer -> chief editor -> art director -> marketer + SEO tagger -> illustrator
 Every stage can also be re-run alone, and scenes that are already done are
 skipped, so a failed run resumes."""
 import contextvars
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import company, images, scenarist, storage, team, tts, video, youtube
+from pathlib import Path
+
 from .config import load_settings
 from .storage import edit_project, get_project, log, project_dir, set_stage
 
@@ -66,10 +69,13 @@ def stage_review(pid, force=False):
         return
     set_stage(pid, "review", status="running", progress=20, error=None)
     log(pid, "читаю сценарий…", "editor")
-    review = team.review_script(p["script"], p["idea"], p["language"])
+    history = [x["title"] for x in storage.list_projects()
+               if x["channel_id"] and x["channel_id"] == p["channel_id"] and x["id"] != pid][:15]
+    review = team.review_script(p["script"], p["idea"], p["language"], history)
     score = int(review.get("score") or 0)
-    log(pid, f"оценка {score}/10 — {review.get('verdict', '')}", "editor")
-    if score < 8 and review.get("fixes"):
+    log(pid, f"оценка {score}/10, уникальность {review.get('originality', '—')}/10 — {review.get('verdict', '')}", "editor")
+    original = int(review.get("originality") or 10)
+    if (score < 8 or original < 7) and review.get("fixes"):
         set_stage(pid, "review", progress=60)
         log(pid, "дорабатываю по замечаниям редактора…", "writer")
         new = scenarist.write_script(p["idea"], p["language"], p["scene_count"], p["pacing"], p["style"],
@@ -275,7 +281,7 @@ def stage_render(pid, force=False):
         ass = d / "output" / "subs.ass"
         video.write_ass(timeline, ass, p["aspect"])
     out = d / "output" / "video.mp4"
-    music = settings.get("background_music") or None
+    music = pick_music(settings.get("background_music"))
     video.assemble(clips, out, d / "output", ass, music, settings["music_volume"])
     for c in clips:
         c.unlink(missing_ok=True)
@@ -284,6 +290,17 @@ def stage_render(pid, force=False):
         p2["duration"] = round(offset, 1)
     log(pid, f"видео готово: {offset / 60:.1f} мин", "animator")
     set_stage(pid, "render", status="done", progress=100)
+
+
+def pick_music(setting):
+    """A file is used as is; a folder gives each video a random track from it."""
+    if not setting:
+        return None
+    path = Path(setting)
+    if path.is_dir():
+        tracks = [f for f in path.iterdir() if f.suffix.lower() in (".mp3", ".wav", ".m4a", ".ogg")]
+        return str(random.choice(tracks)) if tracks else None
+    return str(path) if path.exists() else None
 
 
 def stage_upload(pid, force=False):
