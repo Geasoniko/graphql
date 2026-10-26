@@ -53,6 +53,13 @@ STAFF = [
 # Roles that get OpenRouter's web search plugin: they must see what is trending today.
 WEB_ROLES = {"researcher", "tagger"}
 
+# Backup ids sent as OpenRouter's `models` fallback list: if the main id is
+# missing or down, OpenRouter routes the request to the next one.
+FALLBACKS = {
+    "google/gemini-3.1-flash-image": ["google/gemini-3.1-flash-image-preview"],
+    "google/gemini-3.1-flash-image-preview": ["google/gemini-3.1-flash-image"],
+}
+
 ROLES = {r[0]: {"role": r[0], "department": r[1], "emoji": r[2], "name": r[3],
                 "default_model": r[4], "kind": r[5], "duty": r[6], "web": r[0] in WEB_ROLES} for r in STAFF}
 
@@ -60,6 +67,10 @@ ROLES = {r[0]: {"role": r[0], "department": r[1], "emoji": r[2], "name": r[3],
 def model_for(role):
     custom = (load_settings().get("agents") or {}).get(role) or {}
     return custom.get("model") or ROLES[role]["default_model"]
+
+
+def candidates(model):
+    return [model, *FALLBACKS.get(model, [])]
 
 
 def name(role):

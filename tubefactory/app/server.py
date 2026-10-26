@@ -142,7 +142,8 @@ def check_agents():
     for a in agents.staff():
         if a["kind"] == "tool":
             continue
-        m = catalogue.get(a["model"])
+        found = [x for x in agents.candidates(a["model"]) if x in catalogue]
+        m = catalogue.get(found[0]) if found else None
         out[a["role"]] = {"ok": bool(m), "name": m["name"] if m else None,
                           "prompt_price": m["prompt_price"] if m else None,
                           "image": bool(m) and "image" in m["output"]}

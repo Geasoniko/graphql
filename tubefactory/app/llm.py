@@ -34,6 +34,9 @@ def _headers(settings):
 
 def _post(payload, settings, timeout=300, role=None):
     payload = {**payload, "usage": {"include": True}}
+    backups = agents.candidates(payload["model"])
+    if len(backups) > 1:
+        payload["models"] = backups
     last = None
     for attempt in range(4):
         try:
