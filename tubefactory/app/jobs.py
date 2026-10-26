@@ -161,6 +161,25 @@ def _autopilot():
         time.sleep(60)
 
 
+def reset_interrupted():
+    """Stages left "running" by a previous run that was closed mid-work.
+    Nothing is running yet at startup, so mark them interrupted; the next
+    "Продолжить генерацию" resumes from there."""
+    for p in storage.list_projects():
+        stuck = [k for k, st in p["stages"].items() if st["status"] == "running"]
+        if not stuck:
+            continue
+        with storage.edit_project(p["id"]) as pp:
+            for k in stuck:
+                pp["stages"][k].update(status="error", error="прервано: софт был закрыт во время работы. "
+                                                               "Нажмите «Продолжить генерацию».")
+            for s in (pp.get("script") or {}).get("scenes", []):
+                if s.get("status") == "running":
+                    s["status"] = "idle"
+        storage.log(p["id"], f"Этап прерван закрытием софта: {', '.join(stuck)}")
+
+
 def start():
+    reset_interrupted()
     threading.Thread(target=_worker, daemon=True, name="worker").start()
     threading.Thread(target=_autopilot, daemon=True, name="autopilot").start()
