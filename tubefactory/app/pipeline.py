@@ -31,6 +31,22 @@ def _check(pid):
         raise Cancelled()
 
 
+def _brand(p):
+    """The channel identity made by the stylist, or None."""
+    if not p.get("channel_id"):
+        return None
+    try:
+        return storage.get_channel(p["channel_id"]).get("brand")
+    except KeyError:
+        return None
+
+
+def _avatar(p):
+    from .config import CHANNELS_DIR
+    path = CHANNELS_DIR / str(p.get("channel_id")) / "avatar.jpg"
+    return path if _brand(p) and path.exists() else None
+
+
 def _rel(pid, path):
     return str(path.relative_to(project_dir(pid))).replace("\\", "/")
 
@@ -97,10 +113,11 @@ def stage_art(pid, force=False):
         return
     set_stage(pid, "art", status="running", progress=20, error=None)
     log(pid, "готовлю стиль-гайд, промпты кадров и движения камеры…", "art_director")
-    art = team.art_direction(p["script"], p["style"], p["aspect"])
+    brand = _brand(p)
+    art = team.art_direction(p["script"], p["style"], p["aspect"], brand)
     with edit_project(pid) as p2:
         sc = p2["script"]
-        if art.get("style"):
+        if art.get("style") and not brand:  # the stylist's style is locked for branded channels
             p2["style"] = art["style"]
         chars = {c["id"]: c for c in sc["characters"]}
         for c in art.get("characters") or []:
@@ -123,7 +140,7 @@ def stage_seo(pid, force=False):
         return
     set_stage(pid, "seo", status="running", progress=20, error=None)
     log(pid, "придумываю заголовки и концепцию превью…", "marketer")
-    m = team.marketing(p["script"], p["idea"], p["language"])
+    m = team.marketing(p["script"], p["idea"], p["language"], _brand(p))
     title = m.get("best_title") or p["script"]["title"]
     set_stage(pid, "seo", progress=60)
     log(pid, "подбираю теги по поисковым запросам…", "tagger")
@@ -155,7 +172,10 @@ def stage_characters(pid, force=False):
             continue
         log(pid, f"рисую персонажа {c['name']}", "illustrator")
         path = project_dir(pid) / "characters" / f"{c['id']}.png"
-        images.generate(images.character_prompt(p["style"], c), path, "1:1",
+        hero = (_brand(p) or {}).get("hero") or {}
+        is_hero = hero.get("name") and hero["name"].lower() in (c["name"].lower(), c["id"].lower())
+        refs = [_avatar(p)] if is_hero and _avatar(p) else []  # the mascot looks the same in every video
+        images.generate(images.character_prompt(p["style"], c), path, "1:1", references=refs,
                         label=f"{c['name']}\n{c['description']}", seed=i)
         with edit_project(pid) as p2:
             p2["script"]["characters"][i]["image"] = _rel(pid, path)
@@ -244,9 +264,14 @@ def stage_thumbnail(pid, force=False):
     set_stage(pid, "thumbnail", status="running", progress=30, error=None)
     sc = p["script"]
     raw = project_dir(pid) / "output" / "thumbnail_raw.png"
+    brand = _brand(p) or {}
+    rules = " ".join(brand.get("thumbnail_rules") or [])
     prompt = (f"YouTube thumbnail, bold, high contrast, expressive, clear focal point, "
-              f"no text. Style: {p['style']}. {sc['thumbnail_prompt']}")
+              f"no text. Style: {p['style']}. {sc['thumbnail_prompt']}"
+              + (f" Channel thumbnail rules: {rules}" if rules else ""))
     refs = [project_dir(pid) / c["image"] for c in sc["characters"][:1] if c["image"]]
+    if _avatar(p):
+        refs.append(_avatar(p))
     log(pid, "рисую превью…", "thumbnail")
     images.generate(prompt, raw, "16:9", references=refs, label=sc["title"], seed=7, role="thumbnail")
     out = project_dir(pid) / "output" / "thumbnail.jpg"
@@ -394,6 +419,9 @@ def create_from_idea(idea, channel_id=None, reference="", **overrides):
         ch = storage.get_channel(channel_id)
         for key in ("language", "voice", "style", "scene_count", "pacing", "aspect", "privacy"):
             fields[key] = ch.get(key)
+        palette = (ch.get("brand") or {}).get("palette") or []
+        if palette and fields.get("style"):
+            fields["style"] = f"{fields['style']} Color palette: {', '.join(palette)}."
         hero = (ch.get("brand") or {}).get("hero") or {}
         if hero.get("description"):
             # The stylist's mascot stars in every video, so the channel is recognisable.

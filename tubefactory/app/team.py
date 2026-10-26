@@ -53,7 +53,18 @@ JSON: {{"score": 1-10, "originality": 1-10, "verdict": "коротко на ру
 
 # ---------- art director ----------
 
-def art_direction(script, channel_style, aspect):
+def _brand_text(brand):
+    if not brand:
+        return ""
+    hero = brand.get("hero") or {}
+    return (f"\nChannel brand (from the channel stylist) — follow it strictly:\n"
+            f"- Style is LOCKED, do not change it: {brand.get('style_prompt', '')}\n"
+            f"- Palette: {', '.join(brand.get('palette') or [])}\n"
+            f"- Mascot: {hero.get('name', '')} — {hero.get('description', '')}\n"
+            f"- Thumbnail rules: {'; '.join(brand.get('thumbnail_rules') or [])}\n")
+
+
+def art_direction(script, channel_style, aspect, brand=None):
     system = """You are the art director of an animated YouTube channel. You write a style bible and
 production-ready image prompts for an image model (Gemini image / similar). Keep the same characters
 looking identical in every frame. Each frame must be a single clear composition that illustrates the
@@ -61,7 +72,7 @@ narration literally, with readable emotion, no text in the image. Choose a camer
 so the video feels animated: zoom_in (tension, focus), zoom_out (reveal), pan_left / pan_right
 (travel, landscapes), static (dialogue, simple moments). Reply with JSON only."""
     user = f"""Channel visual style (must follow): {channel_style or 'decide yourself, fitting the topic'}
-Frame aspect: {aspect}
+{_brand_text(brand)}Frame aspect: {aspect}
 Script:
 {_script_text(script)}
 
@@ -77,14 +88,14 @@ Return exactly {len(script['scenes'])} scenes in order."""
 
 # ---------- marketing ----------
 
-def marketing(script, idea, language):
+def marketing(script, idea, language, brand=None):
     system = """You are a YouTube growth marketer. You maximise CTR without clickbait lies: curiosity gap,
 specific numbers, emotion, short punchy titles, thumbnail with ONE clear subject and 2-4 words.
 Reply with JSON only."""
     user = f"""Idea: {idea}
 Language of the video: {language} (title, description and comment in this language)
 Script summary: {_script_text(script, 12000)}
-
+{_brand_text(brand)}
 JSON: {{
  "titles": ["5 title variants, <= 70 chars"],
  "best_title": "the one you'd ship",
