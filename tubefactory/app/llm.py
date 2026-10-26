@@ -55,6 +55,14 @@ def _post(payload, settings, timeout=180, role=None):
             last = f"HTTP {r.status_code}: {r.text[:300]}"
             time.sleep(2 ** (attempt + 1))
             continue
+        if r.status_code == 402:
+            raise LLMError("Не хватает денег на OpenRouter: для картинок нужно минимум $1 на балансе. "
+                           "Пополните https://openrouter.ai/credits или поднимите/снимите лимит ключа "
+                           "на https://openrouter.ai/settings/keys, затем «Продолжить генерацию». "
+                           f"(HTTP 402: {r.text[:200]})")
+        if r.status_code == 401:
+            raise LLMError("OpenRouter не принял ключ: проверьте его в Настройках "
+                           f"(HTTP 401: {r.text[:200]})")
         if r.status_code != 200:
             raise LLMError(f"OpenRouter HTTP {r.status_code}: {r.text[:500]}")
         data = r.json()
