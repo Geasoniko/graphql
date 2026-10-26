@@ -4,29 +4,40 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TubeFactory</title>
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <!-- ?v= forces browsers that cached an older version to fetch the new one -->
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <div class="app">
     <aside class="sidebar">
-      <div class="brand"><div class="logo">T</div>TubeFactory</div>
+      <div class="brand"><div class="logo">T</div><div>TubeFactory<div class="brand-sub">YouTube-компания на ИИ</div></div></div>
       <nav class="nav">
         <div class="nav-title">Основное</div>
-        <a href="#/home" data-page="home">🏠 Главная</a>
-        <a href="#/company" data-page="company">🏢 Компания</a>
-        <a href="#/scenarist" data-page="scenarist">✨ AI-сценарист</a>
-        <a href="#/projects" data-page="projects">🎬 Проекты <span class="badge" id="nav-projects">0</span></a>
-        <a href="#/queue" data-page="queue">⏳ Очередь <span class="badge" id="nav-queue">0</span></a>
+        <a href="#/home" data-page="home"><span class="ico">🏠</span>Главная</a>
+        <a href="#/company" data-page="company"><span class="ico">🏢</span>Компания</a>
+        <a href="#/projects" data-page="projects"><span class="ico">🎬</span>Проекты <span class="badge" id="nav-projects">0</span></a>
+        <a href="#/queue" data-page="queue"><span class="ico">⏳</span>Очередь <span class="badge" id="nav-queue">0</span></a>
         <div class="nav-title">Инструменты</div>
-        <a href="#/channels" data-page="channels">📺 Каналы <span class="badge" id="nav-channels">0</span></a>
-        <a href="#/niches" data-page="niches">🔎 Поиск ниш</a>
-        <a href="#/settings" data-page="settings">⚙️ Настройки</a>
+        <a href="#/scenarist" data-page="scenarist"><span class="ico">✨</span>AI-сценарист</a>
+        <a href="#/channels" data-page="channels"><span class="ico">📺</span>Каналы <span class="badge" id="nav-channels">0</span></a>
+        <a href="#/niches" data-page="niches"><span class="ico">🔎</span>Поиск ниш</a>
+        <a href="#/settings" data-page="settings"><span class="ico">⚙️</span>Настройки</a>
       </nav>
+      <div id="live-job"></div>
       <div class="foot" id="foot"></div>
     </aside>
-    <main class="main" id="view"></main>
+    <main class="main">
+      <header class="topbar">
+        <div class="grow" id="topbar-title"></div>
+        <div class="topbar-spend" id="topbar-spend" title="Всего потрачено на OpenRouter"></div>
+        <button class="btn primary" id="new-video">➕ Новое видео</button>
+      </header>
+      <div id="view" class="view"></div>
+    </main>
   </div>
-  <!-- ?v= forces browsers that cached an older version to fetch the new one -->
-  <script src="app.js?v=3"></script>
+  <div id="modal-root"></div>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

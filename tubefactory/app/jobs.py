@@ -78,12 +78,12 @@ def _worker():
 
 # ---------- director + autopilot ----------
 
-def plan_video(channel_id, start=True, ideas=None):
+def plan_video(channel_id, start=True, ideas=None, scene_count=None):
     """Planning meeting: researcher brings ideas, director picks one, the team starts.
     What the meeting cost is booked to the project it creates."""
     spent = []
     with company.booking(lambda role, cost: spent.append((role, cost))):
-        project = _plan_video(channel_id, ideas)
+        project = _plan_video(channel_id, ideas, scene_count)
     for role, cost in spent:
         storage.add_cost(project["id"], role, cost)
     if start:
@@ -91,7 +91,7 @@ def plan_video(channel_id, start=True, ideas=None):
     return storage.get_project(project["id"])
 
 
-def _plan_video(channel_id, ideas):
+def _plan_video(channel_id, ideas, scene_count=None):
     ch = storage.get_channel(channel_id)
     projects = [p for p in storage.list_projects() if p["channel_id"] == channel_id]
     titles = [p["title"] for p in projects]
@@ -115,7 +115,7 @@ def _plan_video(channel_id, ideas):
     made_today = len([p for p in projects if p["created_at"].startswith(time.strftime("%Y-%m-%d"))])
     project = pipeline.create_from_idea(
         idea, channel_id, title=plan.get("title"),
-        scene_count=plan.get("scene_count") or ch.get("scene_count"),
+        scene_count=scene_count or plan.get("scene_count") or ch.get("scene_count"),
         auto_upload=connected and bool(ch.get("autopilot")),
         publish_at=company.next_publish_time(hours, made_today) if connected and ch.get("autopilot") else None)
     with storage.edit_project(project["id"]) as p:

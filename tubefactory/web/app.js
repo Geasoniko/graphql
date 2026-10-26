@@ -6,7 +6,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const view = $("#view");
 
 const STAGE_NAMES = {
-  script: "✍️ Сценарий", review: "🧐 Редактура", art: "🎨 Арт-дирекция", seo: "📣 Маркетинг и теги",
+  script: "✍️ Сценарий", review: "🧐 Редактура", art: "🎨 Арт-дирекция", seo: "📣 Маркетинг",
   characters: "🖌 Персонажи", audio: "🎙 Озвучка", images: "🖌 Кадры",
   thumbnail: "🖼 Баннер", render: "🎬 Монтаж", upload: "🚀 YouTube",
 };
@@ -106,6 +106,8 @@ async function refreshShared() {
   $("#nav-channels").textContent = channels.length;
   $("#nav-projects").textContent = projects.length;
   $("#nav-queue").textContent = queue.queued.length + (queue.current ? 1 : 0);
+  $("#topbar-spend").innerHTML = `💰 потрачено <b>${money(company.total_cost)}</b>`;
+  drawLiveJob();
   $("#foot").innerHTML = settings.demo_active
     ? `<span class="badge warn">демо-режим</span><br>Добавьте ключ OpenRouter в Настройках`
     : `<span class="badge ok">OpenRouter подключён</span>`;
@@ -119,31 +121,44 @@ pages.home = async () => {
   const { projects, channels, queue, settings } = cache;
   const ready = projects.filter((p) => p.output).length;
   const uploaded = projects.filter((p) => p.youtube).length;
+  const steps = [
+    [!settings.demo_active, "Вставить ключ OpenRouter", "#/settings"],
+    [modelsChecked(), "Проверить модели сотрудников", "#/company"],
+    [channels.length > 0, "Создать канал: ниша, стиль, голос", "#/channels"],
+    [projects.length > 0, "Сделать первое видео — кнопка «➕ Новое видео» сверху", null],
+    [channels.some((c) => c.connected), "Подключить YouTube к каналу", "#/channels"],
+    [channels.some((c) => c.autopilot), "Включить автопилот, когда качество устроит", "#/channels"],
+  ];
+  const doneCount = steps.filter((x) => x[0]).length;
   view.innerHTML = `
-    <div class="card"><h1>Главная</h1><div class="muted">Фабрика видео: идея → сценарий → картинки → озвучка → монтаж → YouTube</div></div>
-    ${settings.demo_active ? `<div class="card banner">Сейчас включён <b>демо-режим</b>: вместо ИИ используются заглушки. Вставьте ключ <a href="#/settings">OpenRouter в Настройках</a>, чтобы генерировать настоящие видео.</div>` : ""}
-    <div class="grid">
-      <div class="card"><div class="muted">Проектов</div><div class="stat">${projects.length}</div></div>
-      <div class="card"><div class="muted">Готовых видео</div><div class="stat">${ready}</div></div>
-      <div class="card"><div class="muted">Загружено на YouTube</div><div class="stat">${uploaded}</div></div>
+    ${settings.demo_active ? `<div class="card banner">Сейчас <b>демо-режим</b>: вместо ИИ — заглушки. Вставьте ключ <a href="#/settings">OpenRouter в Настройках</a>, чтобы делать настоящие видео.</div>` : ""}
+    <div class="grid stats">
+      <div class="card"><div class="muted">Готовых видео</div><div class="stat">${ready}<span class="muted small"> из ${projects.length}</span></div></div>
+      <div class="card"><div class="muted">На YouTube</div><div class="stat">${uploaded}</div></div>
       <div class="card"><div class="muted">Каналов / на автопилоте</div><div class="stat">${channels.length} / ${channels.filter((c) => c.autopilot).length}</div></div>
       <div class="card"><div class="muted">Потрачено на OpenRouter</div><div class="stat">${money(cache.company.total_cost)}</div></div>
-      <div class="card"><div class="muted">В среднем за готовое видео</div><div class="stat">${ready ? money(projects.filter((p) => p.output).reduce((a, p) => a + (p.cost?.total || 0), 0) / ready) : "—"}</div></div>
+      <div class="card"><div class="muted">В среднем за видео</div><div class="stat">${ready ? money(projects.filter((p) => p.output).reduce((a, p) => a + (p.cost?.total || 0), 0) / ready) : "—"}</div></div>
     </div>
-    <div class="card">
-      <div class="row"><h2 class="grow">Быстрый старт</h2></div>
-      <ol class="muted">
-        <li><a href="#/settings">Настройки</a>: вставьте ключ OpenRouter (один ключ на текст и картинки).</li>
-        <li><a href="#/channels">Каналы</a>: создайте канал, укажите нишу, стиль, голос. Подключите YouTube.</li>
-        <li><a href="#/scenarist">AI-сценарист</a>: вставьте ссылку на видео конкурента → получите идеи → «Создать проект».</li>
-        <li>В проекте нажмите «Запустить генерацию» — всё остальное сделает софт.</li>
-        <li>Включите автопилот у канала — софт сам будет делать и загружать видео каждый день.</li>
-      </ol>
-    </div>
-    <div class="card"><h2>Последние проекты</h2><div class="grid">${projects.slice(0, 8).map(projectCard).join("") || '<div class="muted">Пока пусто</div>'}</div></div>
-    ${queue.current ? `<div class="card"><h2>Сейчас в работе</h2><a href="#/project/${queue.current.project_id}">${esc(projectTitle(queue.current.project_id))}</a></div>` : ""}
+    ${doneCount < steps.length ? `<div class="card">
+      <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">🚀 Запуск компании</h2><span class="badge ${doneCount ? "ok" : ""}">${doneCount} из ${steps.length}</span></div>
+      <div class="bar ok" style="margin-bottom:12px"><div style="width:${Math.round(doneCount / steps.length * 100)}%"></div></div>
+      <div class="checklist">${steps.map(([ok, label, href], i) => `
+        <a class="check-item ${ok ? "done" : ""}" ${href ? `href="${href}"` : `href="#" data-new-video`}><span class="dot">${ok ? "✓" : i + 1}</span><span class="lbl grow">${label}</span>${ok ? "" : "<span class=\"muted\">→</span>"}</a>`).join("")}</div>
+    </div>` : ""}
+    <div class="card"><div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">Последние видео</h2><a href="#/projects" class="small">все проекты →</a></div>
+      ${projects.length ? `<div class="grid">${projects.slice(0, 8).map(projectCard).join("")}</div>` : emptyState("🎬", "Пока нет ни одного видео", "Нажмите «➕ Новое видео» — директор выберет тему, команда сделает остальное.")}</div>
   `;
+  $$("[data-new-video]").forEach((a) => a.onclick = (e) => { e.preventDefault(); openNewVideo(); });
 };
+
+function emptyState(icon, title, text) {
+  return `<div class="empty"><div class="big">${icon}</div><b>${title}</b><div class="small" style="margin-top:4px">${text}</div>
+    <button class="btn primary" style="margin-top:14px" onclick="openNewVideo()">➕ Новое видео</button></div>`;
+}
+
+function modelsChecked() {
+  try { return localStorage.getItem("tf-models-ok") === "1"; } catch { return false; }
+}
 
 function projectTitle(pid) {
   return (cache.projects.find((p) => p.id === pid) || {}).title || pid;
@@ -168,23 +183,15 @@ function projectCard(p) {
 
 pages.projects = async () => {
   view.innerHTML = `
-    <div class="card row"><h1 class="grow">Проекты</h1>
-      <button class="btn primary" onclick="location.hash='#/scenarist'">+ Новый через AI-сценариста</button>
-      <button class="btn" id="quick">+ Из своей идеи</button></div>
-    <div class="grid">${cache.projects.map(projectCard).join("") || '<div class="card muted">Проектов пока нет</div>'}</div>`;
-  $("#quick").onclick = () => {
-    const idea = prompt("Идея видео (лучше на английском):");
-    if (idea) guard(async () => {
-      const p = await api("/api/projects", { body: { idea, channel_id: cache.channels[0]?.id } });
-      location.hash = `#/project/${p.id}`;
-    });
-  };
+    <div class="card row"><div class="col grow" style="gap:2px"><h1>Проекты</h1><div class="muted small">${cache.projects.length} видео · потрачено ${money(cache.projects.reduce((a, p) => a + (p.cost?.total || 0), 0))}</div></div>
+      <button class="btn" onclick="location.hash='#/scenarist'">✨ По видео конкурента</button></div>
+    ${cache.projects.length ? `<div class="grid">${cache.projects.map(projectCard).join("")}</div>`
+      : `<div class="card">${emptyState("🎬", "Проектов пока нет", "Создайте первое видео — это займёт 5–10 минут.")}</div>`}`;
 };
 
 pages.scenarist = async () => {
   view.innerHTML = `
-    <div class="card"><h1>AI-сценарист</h1>
-      <div class="muted">Вставьте ссылку на видео конкурента с миллионами просмотров — софт разберёт его и предложит идеи. Или просто укажите нишу.</div></div>
+    <div class="card muted">Вставьте ссылку на видео конкурента с миллионами просмотров — аналитик разберёт его и предложит идеи. Или просто укажите нишу.</div>
     <div class="card form">
       <label class="wide">Ссылка на YouTube-видео (референс)<input id="sc-url" placeholder="https://www.youtube.com/watch?v=..."></label>
       <label class="wide">…или текст / сценарий референса<textarea id="sc-text" placeholder="Можно вставить транскрипт или описание"></textarea></label>
@@ -259,17 +266,27 @@ pages.project = async (pid) => {
   }, 2000);
 };
 
+const STEP_STATUS = { done: "готово", running: "идёт", error: "ошибка", stale: "устарело", idle: "ждёт" };
+
+function stepHTML(p, k, st) {
+  const locked = p.busy || (!p.script && k !== "script");
+  const label = st.status === "running" ? `идёт · ${st.progress}%` : STEP_STATUS[st.status] || st.status;
+  return `<div class="step ${st.status} ${locked ? "locked" : ""}" id="stage-${k}" data-step="${k}"
+    title="${locked ? "" : st.status === "done" ? "Нажмите, чтобы переделать этап" : "Нажмите, чтобы запустить этап"}">
+    <div class="n">${STAGE_NAMES[k]}</div><div class="st">${label}</div>
+    <div class="fill" style="width:${st.status === "idle" ? 0 : st.progress}%"></div></div>`;
+}
+
 function updateProgress(p) {
   for (const [k, st] of Object.entries(p.stages)) {
     const el = $(`#stage-${k}`);
-    if (!el) continue;
-    $(".bar > div", el).style.width = st.progress + "%";
-    $(".badge", el).outerHTML = stageBadge(st);
+    if (el) el.outerHTML = stepHTML(p, k, st);
   }
 }
 
 function renderProject(p, keepScroll = false) {
   const y = window.scrollY;
+  setTitle("🎬 Проект");
   const sc = p.script;
   const chOptions = `<option value="">— без канала —</option>` + options(cache.channels.map((c) => [c.id, c.name]), p.channel_id);
   view.innerHTML = `
@@ -281,13 +298,9 @@ function renderProject(p, keepScroll = false) {
     </div>
 
     <div class="card">
-      <div class="stages">${Object.entries(p.stages).map(([k, st]) => `
-        <div class="stage" id="stage-${k}" title="${esc(st.error || "")}">
-          <div class="row"><b>${STAGE_NAMES[k]}</b>${stageBadge(st)}</div>
-          <div class="bar ${st.status === "done" ? "ok" : st.status === "error" ? "err" : ""}"><div style="width:${st.progress}%"></div></div>
-          <div class="row" style="margin-top:6px"><button class="btn sm" data-stage="${k}" ${p.busy || (!sc && k !== "script") ? "disabled" : ""}>${st.status === "done" ? "↻ заново" : "▶ этап"}</button></div>
-          ${st.error ? `<div class="small" style="color:var(--err)">${esc(st.error).slice(0, 160)}</div>` : ""}
-        </div>`).join("")}</div>
+      <div class="stepper">${Object.entries(p.stages).map(([k, st]) => stepHTML(p, k, st)).join("")}</div>
+      ${Object.entries(p.stages).filter(([, st]) => st.status === "error").map(([k, st]) =>
+        `<div class="alert" style="margin-top:10px">⚠️ <b>${STAGE_NAMES[k]}</b>: ${esc(st.error || "")}<div class="small muted" style="margin-top:4px">Нажмите «▶ Продолжить генерацию» — софт продолжит с места ошибки.</div></div>`).join("")}
     </div>
 
     ${costCard(p)}
@@ -401,7 +414,13 @@ function bindProject(p) {
   $("#p-del").onclick = () => confirm("Удалить проект со всеми файлами?") && guard(async () => {
     await api(`/api/projects/${pid}`, { method: "DELETE" }); location.hash = "#/projects";
   });
-  $$("[data-stage]").forEach((b) => b.onclick = () => run(b.dataset.stage, true));
+  // Delegated: polling replaces the step elements, the container stays.
+  $(".stepper").onclick = (e) => {
+    const b = e.target.closest("[data-step]");
+    if (!b || b.classList.contains("locked")) return;
+    const k = b.dataset.step, done = b.classList.contains("done");
+    if (confirm(`${done ? "Переделать" : "Запустить"} этап «${STAGE_NAMES[k]}»?${done ? "\nЭто снова потратит деньги на этот этап." : ""}`)) run(k, true);
+  };
   $("#p-save").onclick = (e) => guard(async () => {
     const body = {};
     for (const k of ["idea", "channel_id", "language", "voice", "pacing", "aspect", "privacy", "publish_at", "style"]) body[k] = $(`#f-${k}`).value || null;
@@ -538,6 +557,7 @@ pages.company = async () => {
         if (!r.ok) bad++;
         if (el) el.innerHTML = r.ok ? `<span class="badge ok">есть в OpenRouter</span>` : `<span class="badge err">не найдена — выберите другую</span>`;
       }
+      try { localStorage.setItem("tf-models-ok", bad ? "0" : "1"); } catch {}
       toast(bad ? `Не найдено моделей: ${bad}. Сначала сохраните изменения, потом проверьте снова.` : "Все модели есть в OpenRouter");
     }, e.target);
     $("#c-reset").onclick = (e) => confirm("Поставить всем сотрудникам рекомендованные модели (качество за свои деньги)?") && guard(async () => {
@@ -723,12 +743,110 @@ pages.settings = async () => {
   }, e.target);
 };
 
+// ---------------- shell: title, live job, new-video wizard ----------------
+
+const PAGE_TITLES = {
+  home: "🏠 Главная", company: "🏢 Компания", projects: "🎬 Проекты", queue: "⏳ Очередь",
+  scenarist: "✨ AI-сценарист", channels: "📺 Каналы", niches: "🔎 Поиск ниш", settings: "⚙️ Настройки",
+};
+
+function setTitle(text) {
+  $("#topbar-title").textContent = text;
+  document.title = text.replace(/^\S+\s/, "") + " — TubeFactory";
+}
+
+function drawLiveJob() {
+  const q = cache.queue;
+  const box = $("#live-job");
+  if (!q || !q.current) { box.innerHTML = ""; return; }
+  const p = cache.projects.find((x) => x.id === q.current.project_id);
+  const running = p && Object.entries(p.stages).find(([, st]) => st.status === "running");
+  const pct = running ? running[1].progress : 0;
+  box.innerHTML = `<div class="live" onclick="location.hash='#/project/${q.current.project_id}'">
+    <div class="t"><span class="pulse"></span>${esc(p ? p.title : "Видео")}</div>
+    <div class="s">${running ? STAGE_NAMES[running[0]] + " · " + pct + "%" : "готовится…"}${q.queued.length ? ` · ещё ${q.queued.length} в очереди` : ""}</div>
+    <div class="bar"><div style="width:${pct}%"></div></div></div>`;
+}
+
+// Keeps the sidebar job widget and counters fresh on every page.
+setInterval(async () => {
+  const [queue, projects] = await Promise.all([api("/api/queue"), api("/api/projects")]).catch(() => [null, null]);
+  if (!queue) return;
+  Object.assign(cache, { queue, projects });
+  $("#nav-queue").textContent = queue.queued.length + (queue.current ? 1 : 0);
+  $("#nav-projects").textContent = projects.length;
+  drawLiveJob();
+}, 4000);
+
+function closeModal() { $("#modal-root").innerHTML = ""; }
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { closeModal(); $$(".lightbox").forEach((x) => x.remove()); }
+});
+
+function openNewVideo() {
+  if (!cache.channels.length) {
+    toast("Сначала создайте канал: у него ниша, стиль и голос для видео");
+    location.hash = "#/channels";
+    return;
+  }
+  const ch0 = cache.channels[0];
+  $("#modal-root").innerHTML = `<div class="modal-back" id="nv-back"><div class="modal">
+    <h2>➕ Новое видео</h2>
+    <div class="col" style="gap:14px">
+      <label>Канал<select id="nv-channel">${options(cache.channels.map((c) => [c.id, c.name]))}</select></label>
+      <div class="choice">
+        <label><input type="radio" name="nv-mode" value="director" checked><span><b>👔 Тему выберет директор</b><br><span class="muted small">Исследователь найдёт тренды, директор выберет лучшее</span></span></label>
+        <label><input type="radio" name="nv-mode" value="idea"><span><b>💡 Своя идея</b><br><span class="muted small">Опишите тему видео сами</span></span></label>
+      </div>
+      <label id="nv-idea-box" style="display:none">Идея видео (лучше на английском)<textarea id="nv-idea" placeholder="How ancient people navigated without maps"></textarea></label>
+      <div class="col" style="gap:6px"><div class="slider-label">Сцен в видео: <b id="nv-n">${ch0.scene_count || 20}</b> · длина ≈ <b id="nv-min"></b> мин</div>
+        <input type="range" id="nv-scenes" min="5" max="80" step="1" value="${ch0.scene_count || 20}"></div>
+      <div class="est-box"><div><div class="muted small">Оценка стоимости</div><div class="small muted" id="nv-est-note">тексты + картинки, озвучка бесплатно</div></div><div class="stat" id="nv-est">…</div></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn" id="nv-cancel">Отмена</button><button class="btn primary big" id="nv-go">🚀 Запустить</button></div>
+    </div></div></div>`;
+  const upd = async () => {
+    const n = +$("#nv-scenes").value;
+    $("#nv-n").textContent = n;
+    $("#nv-min").textContent = Math.max(1, Math.round(n * (($("#nv-channel") && cache.channels.find((c) => c.id === $("#nv-channel").value)?.pacing) === "dynamic" ? 4 : 11) / 60));
+    const e = await api(`/api/estimate?scenes=${n}`).catch(() => null);
+    if (e) $("#nv-est").textContent = "~" + money(e.total);
+  };
+  $("#nv-scenes").oninput = upd;
+  $("#nv-channel").onchange = () => {
+    const c = cache.channels.find((x) => x.id === $("#nv-channel").value);
+    $("#nv-scenes").value = c.scene_count || 20; upd();
+  };
+  $$("[name=nv-mode]").forEach((r) => r.onchange = () => { $("#nv-idea-box").style.display = r.value === "idea" && r.checked ? "" : "none"; });
+  $("#nv-cancel").onclick = closeModal;
+  $("#nv-back").onclick = (e) => { if (e.target.id === "nv-back") closeModal(); };
+  $("#nv-go").onclick = (e) => guard(async () => {
+    const cid = $("#nv-channel").value, scene_count = +$("#nv-scenes").value;
+    const mode = $("[name=nv-mode]:checked").value;
+    let p;
+    if (mode === "idea") {
+      const idea = $("#nv-idea").value.trim();
+      if (!idea) { toast("Напишите идею видео", true); return; }
+      p = await api("/api/projects", { body: { idea, channel_id: cid, scene_count, start: true } });
+    } else {
+      e.target.textContent = "👔 Директор думает…";
+      p = await api(`/api/channels/${cid}/plan`, { body: { start: true, scene_count } });
+    }
+    closeModal();
+    toast("Команда взялась за работу");
+    location.hash = `#/project/${p.id}`;
+  }, e.target);
+  upd();
+}
+window.openNewVideo = openNewVideo;
+$("#new-video").onclick = openNewVideo;
+
 // ---------------- router ----------------
 
 async function reroute() {
   clearInterval(pollTimer);
   const [, page = "home", arg] = location.hash.split("/");
   $$(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === page || (page === "project" && a.dataset.page === "projects")));
+  setTitle(PAGE_TITLES[page] || PAGE_TITLES.home);
   try {
     await refreshShared();
     await (pages[page] || pages.home)(arg);

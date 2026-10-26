@@ -177,7 +177,7 @@ def plan(cid: str, body: dict = Body(default={})):
     except KeyError:
         raise HTTPException(404, "Канал не найден")
     try:
-        return jobs.plan_video(cid, start=body.get("start", True))
+        return jobs.plan_video(cid, start=body.get("start", True), scene_count=body.get("scene_count"))
     except Exception as e:
         _fail(e)
 
