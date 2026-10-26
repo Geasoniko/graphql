@@ -59,9 +59,11 @@ function options(list, value) {
 function voiceOptions(value) {
   const provider = cache.settings.tts_provider;
   const list = provider === "openai" || provider === "openrouter" ? cache.voices.openai
-    : provider === "kokoro" ? cache.voices.kokoro : cache.voices.edge;
+    : provider === "kokoro" ? cache.voices.kokoro
+    : provider === "elevenlabs" ? cache.voices.elevenlabs : cache.voices.edge;
+  // A voice from another service is not offered: the first voice of this service is preselected.
   const known = list.some((v) => v.id === value);
-  return options(known || !value ? list : [{ id: value, name: value }, ...list], value);
+  return options(list, known ? value : list[0]?.id);
 }
 
 const money = (v) => "$" + (v || 0).toFixed(v && v < 0.1 ? 3 : 2);
@@ -794,7 +796,7 @@ pages.settings = async () => {
       <label>Модель OpenRouter TTS<input id="s-openrouter_tts_model" value="${esc(s.openrouter_tts_model)}"></label>
       <label>OpenAI API key<input id="s-openai_api_key" value="${esc(s.openai_api_key)}"></label>
       <label>ElevenLabs API key<input id="s-elevenlabs_api_key" value="${esc(s.elevenlabs_api_key)}"></label>
-      <div class="wide muted small">Для ElevenLabs в поле «Голос» у канала/проекта укажите voice_id.</div>
+      <div class="wide muted small">После смены сервиса сохраните настройки и выберите голос заново в каждом канале (Каналы → Голос → ▶ послушать).</div>
 
       <h2 class="wide">Монтаж</h2>
       <label class="check"><input type="checkbox" id="s-subtitles" ${s.subtitles ? "checked" : ""}> Субтитры в видео</label>

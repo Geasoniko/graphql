@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import requests
@@ -167,8 +168,41 @@ def _openai(text, voice, path, settings):
     return None
 
 
+# Premade ElevenLabs voices, used when the account's list can't be fetched.
+ELEVEN_DEFAULT = [
+    ("JBFqnCBsd6RMkjVDRZzb", "George — британский рассказчик"),
+    ("onwK4e9ZLuTAKqWW03F9", "Daniel — британский, новостной"),
+    ("nPczCjzI2devNBz1zQrb", "Brian — американский, глубокий"),
+    ("pNInz6obpgDQGcFmaJgB", "Adam — американский, низкий"),
+    ("21m00Tcm4TlvDq8ikWAM", "Rachel — американский, женский"),
+]
+_eleven_cache = {"at": 0, "key": None, "voices": None}
+
+
+def elevenlabs_voices(settings):
+    """Voices of the user's ElevenLabs account (cached 10 min), or the premade list."""
+    key = settings.get("elevenlabs_api_key")
+    c = _eleven_cache
+    if key and (c["key"] != key or time.time() - c["at"] > 600):
+        try:
+            r = requests.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": key}, timeout=15)
+            r.raise_for_status()
+            out = []
+            for v in r.json().get("voices", []):
+                labels = v.get("labels") or {}
+                extra = ", ".join(x for x in (labels.get("accent"), labels.get("gender"), labels.get("description")) if x)
+                out.append((v["voice_id"], f"{v['name']}" + (f" — {extra}" if extra else "")))
+            c.update(at=time.time(), key=key, voices=out or None)
+        except (requests.RequestException, KeyError, ValueError):
+            c.update(at=time.time(), key=key, voices=None)
+    return c["voices"] or ELEVEN_DEFAULT
+
+
 def _elevenlabs(text, voice, path, settings):
     import base64
+    known = dict(elevenlabs_voices(settings))
+    if voice not in known and not re.fullmatch(r"[A-Za-z0-9]{20}", voice or ""):
+        voice = next(iter(known))  # e.g. an Edge voice name left from another service
     r = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{voice}/with-timestamps",
         headers={"xi-api-key": settings["elevenlabs_api_key"]},
@@ -222,6 +256,8 @@ def synthesize(text, voice, path):
     elif provider == "elevenlabs" and settings.get("elevenlabs_api_key"):
         words = _elevenlabs(text, voice, path, settings)
     else:
+        if not re.fullmatch(r"[a-z]{2,3}-[A-Z]{2}-\w+Neural", voice or ""):
+            voice = "en-US-AndrewNeural"  # a voice id from another service
         try:
             words = _edge(text, voice, path)
         except Exception:

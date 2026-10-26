@@ -64,8 +64,11 @@ def models():
 
 @app.get("/api/voices")
 def voices():
+    settings = config.load_settings()
+    eleven = tts.elevenlabs_voices(settings) if settings.get("tts_provider") == "elevenlabs" else tts.ELEVEN_DEFAULT
     return {"edge": [{"id": v, "name": n} for v, n in tts.EDGE_VOICES],
             "kokoro": [{"id": v, "name": n} for v, n in tts.KOKORO_VOICES],
+            "elevenlabs": [{"id": v, "name": n} for v, n in eleven],
             "openai": [{"id": v, "name": v} for v in tts.OPENAI_VOICES]}
 
 
