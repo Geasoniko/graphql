@@ -6,13 +6,16 @@ timings get them from Whisper when that module is installed, otherwise
 they are estimated from word length.
 """
 import asyncio
+import json
 import os
 import re
 import subprocess
+import threading
+from pathlib import Path
 
 import requests
 
-from . import align
+from . import align, system
 from .config import is_demo, load_settings
 
 EDGE_VOICES = [
@@ -85,22 +88,48 @@ def _edge(text, voice, path, rate="+0%"):
 
 
 _kokoro = {}
+_kokoro_worker = {"proc": None, "lock": threading.Lock()}
+
+
+def _kokoro_in_worker(text, voice, wav):
+    """Kokoro in a separate Python 3.10-3.12 process, started once and reused."""
+    w = _kokoro_worker
+    with w["lock"]:
+        if w["proc"] is None or w["proc"].poll() is not None:
+            cmd = system.kokoro_python()
+            if not cmd:
+                raise RuntimeError("Kokoro не установлен: Настройки → Ноутбук и модули → Установить")
+            worker = Path(__file__).with_name("kokoro_worker.py")
+            w["proc"] = subprocess.Popen([*cmd, str(worker)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
+            hello = w["proc"].stdout.readline()
+            if "ready" not in hello:
+                w["proc"] = None
+                raise RuntimeError("Kokoro не запустился — переустановите его в Настройках")
+        w["proc"].stdin.write(json.dumps({"text": text, "voice": voice, "out": str(wav)}) + "\n")
+        w["proc"].stdin.flush()
+        reply = json.loads(w["proc"].stdout.readline() or '{"error": "Kokoro остановился"}')
+    if "error" in reply:
+        raise RuntimeError(f"Kokoro: {reply['error']}")
 
 
 def _kokoro_tts(text, voice, path):
-    """Local Kokoro-82M; the pipeline is loaded once per accent (a = US, b = UK)."""
-    import numpy as np
-    import soundfile as sf
-    from kokoro import KPipeline
-
+    """Local Kokoro-82M: in this Python when it can import kokoro, else in the worker."""
     if voice not in dict(KOKORO_VOICES):
         voice = "am_michael"
-    lang = voice[0]
-    if lang not in _kokoro:
-        _kokoro[lang] = KPipeline(lang_code=lang)
-    chunks = [np.asarray(audio) for _, _, audio in _kokoro[lang](text, voice=voice, speed=1.0)]
     wav = str(path) + ".wav"
-    sf.write(wav, np.concatenate(chunks), 24000)
+    if system.has("kokoro"):
+        import numpy as np
+        import soundfile as sf
+        from kokoro import KPipeline
+
+        lang = voice[0]
+        if lang not in _kokoro:
+            _kokoro[lang] = KPipeline(lang_code=lang)
+        chunks = [np.asarray(audio) for _, _, audio in _kokoro[lang](text, voice=voice, speed=1.0)]
+        sf.write(wav, np.concatenate(chunks), 24000)
+    else:
+        _kokoro_in_worker(text, voice, wav)
     subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", wav, "-c:a", "libmp3lame", "-q:a", "2", str(path)],
                    check=True)
     os.remove(wav)

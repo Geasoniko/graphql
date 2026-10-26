@@ -22,7 +22,8 @@ MODULES = {
     "kokoro": {
         "name": "Kokoro — бесплатный локальный голос",
         "pip": ["kokoro>=0.9", "soundfile"],
-        "about": "Лучший открытый английский голос по слепым тестам, лицензия Apache 2.0. Работает без интернета и без оплаты; с видеокартой NVIDIA быстрее.",
+        "about": "Лучший открытый английский голос по слепым тестам, лицензия Apache 2.0. Работает без интернета и без оплаты; с видеокартой NVIDIA быстрее. Нужен Python 3.10–3.12 (ставится рядом с основным).",
+        "separate_python": True,
     },
 }
 
@@ -32,6 +33,42 @@ _lock = threading.Lock()
 
 def has(module):
     return importlib.util.find_spec(module) is not None
+
+
+_kpy = {"cmd": None, "checked": False, "installed": None}
+
+
+def kokoro_python():
+    """A Python Kokoro supports (3.10-3.12): this one if it fits, else one found
+    through the Windows `py` launcher or pythonX.Y on PATH. None if absent."""
+    if _kpy["checked"]:
+        return _kpy["cmd"]
+    candidates = [[sys.executable]] if sys.version_info < (3, 13) else []
+    for v in ("3.12", "3.11", "3.10"):
+        if shutil.which("py"):
+            candidates.append(["py", f"-{v}"])
+        if shutil.which(f"python{v}"):
+            candidates.append([shutil.which(f"python{v}")])
+    for cmd in candidates:
+        out = _run(cmd + ["-c", "import sys; print(sys.version_info[0] * 100 + sys.version_info[1])"])
+        if out.isdigit() and 310 <= int(out) <= 312:
+            _kpy["cmd"] = cmd
+            break
+    _kpy["checked"] = True
+    return _kpy["cmd"]
+
+
+def kokoro_installed():
+    if has("kokoro"):
+        return True
+    if _kpy["installed"] is None:
+        cmd = kokoro_python()
+        _kpy["installed"] = bool(cmd) and _run(cmd + ["-c", "import kokoro, soundfile; print('ok')"], 60) == "ok"
+    return _kpy["installed"]
+
+
+def installed(module):
+    return kokoro_installed() if module == "kokoro" else has(module)
 
 
 def _run(cmd, timeout=10):
@@ -86,7 +123,8 @@ def report():
         "gpu": g,
         "disk_free_gb": round(disk.free / 1024 ** 3, 1),
         "ffmpeg": bool(shutil.which("ffmpeg")),
-        "modules": {k: {**v, "installed": has(k), "install": _installs.get(k)} for k, v in MODULES.items()},
+        "modules": {k: {**v, "installed": installed(k), "install": _installs.get(k)} for k, v in MODULES.items()},
+        "kokoro_python": " ".join(kokoro_python() or []) or None,
     }
 
 
@@ -98,8 +136,19 @@ def install(module):
             return
         _installs[module] = {"status": "running", "log": "", "started": time.time()}
 
+    python = [sys.executable]
+    if spec.get("separate_python") and sys.version_info >= (3, 13):
+        _kpy["checked"] = False
+        python = kokoro_python()
+        if not python:
+            _installs[module] = {"status": "error", "log": (
+                f"Kokoro пока не поддерживает Python {platform.python_version()}. Поставьте рядом Python 3.12 "
+                "(основной не трогается). В PowerShell:\n  winget install Python.Python.3.12\n"
+                "Затем закройте и откройте софт и снова нажмите «Установить».")}
+            return
+
     def work():
-        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", *spec["pip"]]
+        cmd = [*python, "-m", "pip", "install", "--upgrade", *spec["pip"]]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         lines = []
         for line in proc.stdout:
@@ -107,7 +156,8 @@ def install(module):
             _installs[module]["log"] = "\n".join(lines[-12:])
         proc.wait()
         importlib.invalidate_caches()
-        ok = proc.returncode == 0 and has(module)
+        _kpy["installed"] = None
+        ok = proc.returncode == 0 and installed(module)
         _installs[module]["status"] = "done" if ok else "error"
 
     threading.Thread(target=work, daemon=True).start()
