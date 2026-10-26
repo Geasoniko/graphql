@@ -649,13 +649,15 @@ function brandBlock(c) {
   const ver = encodeURIComponent(b?.time || "");
   return `<div class="card" style="margin-top:14px;background:rgba(5,15,40,.35)">
     <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">🖋 Стилист канала</h2>
-      ${b ? `<span class="badge ok">${esc(b.style_name || "стиль готов")}</span>` : '<span class="badge">стиль не задан</span>'}</div>
+      ${b ? `<span class="badge ok">${esc(b.style_name || "стиль готов")}</span>` : '<span class="badge">стиль не задан</span>'}
+      ${b ? `<button class="btn sm ${c.brand_locked ? "primary" : ""}" data-lock title="Закреплённый стиль нельзя случайно переоформить">${c.brand_locked ? "🔒 Стиль закреплён" : "🔓 Закрепить стиль"}</button>` : ""}
+      ${c.brand_prev ? `<button class="btn sm" data-restore ${c.brand_locked ? "disabled" : ""}>↩ Вернуть прошлый стиль</button>` : ""}</div>
     <div class="form">
       <label>Готовый стиль<select data-preset><option value="">— пусть стилист решит —</option>${options((cache.styles || []).map((x) => [x.id, x.name]), b?.preset)}</select></label>
       <label class="wide">Пожелания или описание примера<textarea data-wish placeholder="например: как на канале с человечками-палочками про древних людей, бумажный фон, красные надписи маркером"></textarea></label>
       <div class="wide muted small" data-preset-about></div>
-      <div class="wide"><button class="btn primary" data-stylist>🖋 ${b ? "Переоформить канал" : "Оформить канал"}</button>
-        <span class="muted small">Стилист задаст стиль кадров и героя, нарисует шапку и аватар (~$0.15)</span></div>
+      <div class="wide"><button class="btn ${b ? "" : "primary"}" data-stylist ${c.brand_locked ? "disabled" : ""}>🖋 ${b ? "Переоформить канал" : "Оформить канал"}</button>
+        <span class="muted small">${c.brand_locked ? "Стиль закреплён — снимите замок, чтобы переоформить." : b ? "Текущий стиль сохранится как «прошлый» — его можно будет вернуть." : "Стилист задаст стиль кадров и героя, нарисует шапку и аватар (~$0.15)"}</span></div>
     </div>
     ${b ? `
       <div style="margin-top:14px;position:relative">
@@ -699,7 +701,21 @@ function bindChannels() {
     const showAbout = () => { const x = (cache.styles || []).find((st) => st.id === presetSel.value); $("[data-preset-about]", card).textContent = x ? x.about : ""; };
     presetSel.onchange = showAbout; showAbout();
     $$("[data-zoom-src]", card).forEach((img) => img.onclick = () => lightbox(img.dataset.zoomSrc));
-    $("[data-stylist]", card).onclick = (e) => guard(async () => {
+    $("[data-lock]", card) && ($("[data-lock]", card).onclick = (e) => guard(async () => {
+      const c = cache.channels.find((x) => x.id === id);
+      await api("/api/channels", { body: { id, brand_locked: !c.brand_locked } });
+      toast(c.brand_locked ? "Замок снят" : "Стиль закреплён 🔒"); await reroute();
+    }, e.target));
+    $("[data-restore]", card) && ($("[data-restore]", card).onclick = (e) => confirm("Вернуть прошлый стиль? Текущий станет «прошлым», так что можно будет вернуть обратно.") && guard(async () => {
+      await api(`/api/channels/${id}/brand/restore`, { body: {} });
+      toast("Прошлый стиль возвращён"); await reroute();
+    }, e.target));
+    $("[data-stylist]", card).onclick = (e) => {
+      const c = cache.channels.find((x) => x.id === id);
+      if (c.brand && !confirm("Переоформить канал? Текущий стиль сохранится как «прошлый» — его можно вернуть.")) return;
+      runStylist(e);
+    };
+    const runStylist = (e) => guard(async () => {
       e.target.textContent = "🖋 Стилист работает… (около минуты)";
       await api(`/api/channels/${id}/stylist`, { body: { preset: presetSel.value || null, wish: $("[data-wish]", card).value } });
       toast("Канал оформлен: стиль кадров, герой, шапка и аватар готовы"); await reroute();

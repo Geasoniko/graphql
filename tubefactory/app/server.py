@@ -213,6 +213,16 @@ def channel_stylist(cid: str, body: dict = Body(default={})):
         _fail(e)
 
 
+@app.post("/api/channels/{cid}/brand/restore")
+def brand_restore(cid: str):
+    try:
+        return branding.restore_previous(cid)
+    except KeyError:
+        raise HTTPException(404, "Канал не найден")
+    except Exception as e:
+        _fail(e)
+
+
 @app.get("/channel-media/{cid}/{name}")
 def channel_media(cid: str, name: str):
     f = (config.CHANNELS_DIR / cid / name).resolve()

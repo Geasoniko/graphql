@@ -1,5 +1,7 @@
 """Channel stylist: builds the channel's visual identity and draws its
 banner (2560x1440) and avatar (800x800) in that style."""
+import shutil
+
 from PIL import Image, ImageOps
 
 from . import company, images, storage, styles, team
@@ -8,10 +10,18 @@ from .config import CHANNELS_DIR
 
 def style_channel(channel_id, wish="", preset_id=None):
     ch = storage.get_channel(channel_id)
+    if ch.get("brand_locked"):
+        raise RuntimeError("Стиль канала закреплён 🔒. Снимите замок, чтобы переоформить.")
+    d = CHANNELS_DIR / channel_id
+    if ch.get("brand"):
+        # Keep the previous identity so it can be restored with one click.
+        for name in ("banner", "avatar"):
+            if (d / f"{name}.jpg").exists():
+                shutil.copyfile(d / f"{name}.jpg", d / f"{name}_prev.jpg")
+        storage.save_channel({"id": channel_id, "brand_prev": ch["brand"], "style_prev": ch.get("style", "")})
     preset = next((p for p in styles.PRESETS if p["id"] == preset_id), None)
     company.feed("stylist", f"разрабатываю фирменный стиль для «{ch['name']}»…", channel_id=channel_id)
     brand = team.channel_style(ch, wish, preset)
-    d = CHANNELS_DIR / channel_id
     d.mkdir(parents=True, exist_ok=True)
     hero = brand.get("hero") or {}
     style = brand.get("style_prompt") or (preset or {}).get("prompt") or ch.get("style", "")
@@ -35,4 +45,27 @@ def style_channel(channel_id, wish="", preset_id=None):
     storage.save_channel({"id": channel_id, "style": style, "brand": brand})
     company.feed("stylist", f"стиль «{brand.get('style_name', '')}» готов: шапка, аватар, правила превью",
                  channel_id=channel_id)
+    return storage.get_channel(channel_id)
+
+
+def restore_previous(channel_id):
+    """Swap the current identity with the previous one (so restoring twice undoes it)."""
+    ch = storage.get_channel(channel_id)
+    if not ch.get("brand_prev"):
+        raise RuntimeError("Прошлого стиля нет")
+    if ch.get("brand_locked"):
+        raise RuntimeError("Стиль канала закреплён 🔒. Снимите замок, чтобы вернуть прошлый.")
+    d = CHANNELS_DIR / channel_id
+    for name in ("banner", "avatar"):
+        cur, prev, tmp = d / f"{name}.jpg", d / f"{name}_prev.jpg", d / f"{name}_tmp.jpg"
+        if prev.exists():
+            if cur.exists():
+                cur.replace(tmp)
+            prev.replace(cur)
+            if tmp.exists():
+                tmp.replace(prev)
+    brand = {**ch["brand_prev"], "time": storage.now()}
+    storage.save_channel({"id": channel_id, "brand": brand, "style": ch.get("style_prev") or brand.get("style_prompt", ""),
+                          "brand_prev": ch.get("brand"), "style_prev": ch.get("style", "")})
+    company.feed("stylist", f"вернул прошлый стиль «{brand.get('style_name', '')}»", channel_id=channel_id)
     return storage.get_channel(channel_id)
