@@ -53,6 +53,14 @@ STAFF = [
 # Roles that get OpenRouter's web search plugin: they must see what is trending today.
 WEB_ROLES = {"researcher", "tagger"}
 
+# How hard each agent "thinks" before answering (OpenRouter reasoning.effort).
+# New models reason at length by default; titles and tags don't need minutes
+# of thinking, the script and the director's choice deserve some.
+EFFORT = {
+    "director": "medium", "writer": "medium", "editor": "low", "art_director": "low",
+    "ref_analyst": "low", "researcher": "low", "analyst": "low", "marketer": "low", "tagger": "minimal",
+}
+
 # Backup ids sent as OpenRouter's `models` fallback list: if the main id is
 # missing or down, OpenRouter routes the request to the next one.
 FALLBACKS = {

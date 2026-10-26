@@ -37,13 +37,13 @@ def _headers(settings):
     }
 
 
-def _post(payload, settings, timeout=300, role=None):
+def _post(payload, settings, timeout=180, role=None):
     payload = {**payload, "usage": {"include": True}}
     backups = agents.candidates(payload["model"])
     if len(backups) > 1:
         payload["models"] = backups
     last = None
-    for attempt in range(4):
+    for attempt in range(3):
         try:
             r = requests.post(f"{API}/chat/completions", headers=_headers(settings),
                               json=payload, timeout=timeout)
@@ -76,20 +76,30 @@ def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, rol
     model = model or settings["fast_text_model" if fast else "text_model"]
     payload = {"model": model, "messages": messages, "temperature": temperature}
     global _web_blocked
+    if role in agents.EFFORT:
+        payload["reasoning"] = {"effort": agents.EFFORT[role]}
     if role and agents.ROLES.get(role, {}).get("web") and not _web_blocked:
         payload["plugins"] = [{"id": "web", "max_results": 8}]
     if max_tokens:
         payload["max_tokens"] = max_tokens
-    try:
-        data = _post(payload, settings, role=role)
-    except LLMError as e:
-        text = str(e).lower()
-        if "plugins" not in payload or not ("plugin" in text or "'web'" in text or "server tool" in text):
-            raise
-        _web_blocked = True
-        company.feed(role, "веб-поиск запрещён в настройках OpenRouter — работаю без него")
-        payload.pop("plugins")
-        data = _post(payload, settings, role=role)
+    started = time.time()
+    while True:
+        try:
+            data = _post(payload, settings, role=role)
+            break
+        except LLMError as e:
+            text = str(e).lower()
+            if "reasoning" in payload and "reasoning" in text:
+                payload.pop("reasoning")  # this model rejects the effort setting
+            elif "plugins" in payload and ("plugin" in text or "'web'" in text or "server tool" in text):
+                _web_blocked = True
+                company.feed(role, "веб-поиск запрещён в настройках OpenRouter — работаю без него")
+                payload.pop("plugins")
+            else:
+                raise
+    took = time.time() - started
+    if role and took > 60:
+        company.feed(role, f"долго думал: {took:.0f} с ({model})")
     content = data["choices"][0]["message"].get("content") or ""
     if isinstance(content, list):
         content = "".join(part.get("text", "") for part in content)
