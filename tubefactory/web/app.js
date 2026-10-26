@@ -626,7 +626,7 @@ function channelForm(c) {
       <label>Название<input data-k="name" value="${esc(c.name)}"></label>
       <label class="wide">Ниша (для автопилота и идей)<input data-k="niche" value="${esc(c.niche)}" placeholder="например: how ancient people survived, animated explainer"></label>
       <label>Язык<select data-k="language">${options(LANGUAGES, c.language)}</select></label>
-      <label>Голос<select data-k="voice">${voiceOptions(c.voice)}</select></label>
+      <label>Голос <a href="#" class="small" data-preview>▶ послушать</a><select data-k="voice">${voiceOptions(c.voice)}</select></label>
       <label>Сцен в видео<input data-k="scene_count" type="number" value="${c.scene_count}"></label>
       <label>Ритм<select data-k="pacing">${options([["calm", "Спокойный"], ["dynamic", "Динамичный"]], c.pacing)}</select></label>
       <label>Формат<select data-k="aspect">${options([["16:9", "16:9"], ["9:16", "9:16 Shorts"]], c.aspect)}</select></label>
@@ -697,6 +697,17 @@ function bindChannels() {
       toast("Канал сохранён"); await reroute();
     }, e.target);
     $("[data-del]", card).onclick = () => confirm("Удалить канал?") && guard(async () => { await api(`/api/channels/${id}`, { method: "DELETE" }); await reroute(); });
+    $("[data-preview]", card).onclick = (e) => {
+      e.preventDefault();
+      const link = e.target;
+      guard(async () => {
+        link.textContent = "⏳ озвучиваю… (Kokoro первый раз ~1 мин)";
+        try {
+          const r = await api("/api/voices/preview", { body: { voice: $("[data-k=voice]", card).value } });
+          new Audio(r.url).play();
+        } finally { link.textContent = "▶ послушать"; }
+      });
+    };
     const presetSel = $("[data-preset]", card);
     const showAbout = () => { const x = (cache.styles || []).find((st) => st.id === presetSel.value); $("[data-preset-about]", card).textContent = x ? x.about : ""; };
     presetSel.onchange = showAbout; showAbout();

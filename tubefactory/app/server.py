@@ -69,6 +69,26 @@ def voices():
             "openai": [{"id": v, "name": v} for v in tts.OPENAI_VOICES]}
 
 
+@app.post("/api/voices/preview")
+def voice_preview(body: dict = Body(...)):
+    """Speak a sample sentence with the chosen voice (the first Kokoro call also loads the model)."""
+    voice = body.get("voice") or ""
+    path = config.DATA / "voice_preview.mp3"
+    text = body.get("text") or ("Forty thousand years ago, there were no maps, no roads and no signs. "
+                                "So how did our ancestors find their way home?")
+    try:
+        tts.synthesize(text, voice, path)
+    except Exception as e:
+        _fail(f"Не получилось озвучить: {e}")
+    return {"url": f"/voice-preview.mp3?v={int(path.stat().st_mtime)}"}
+
+
+@app.get("/voice-preview.mp3")
+def voice_preview_file():
+    return FileResponse(config.DATA / "voice_preview.mp3", media_type="audio/mpeg",
+                        headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/api/system")
 def system_report():
     return system.report()
