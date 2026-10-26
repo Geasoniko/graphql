@@ -35,4 +35,6 @@ if __name__ == "__main__":
         sys.exit(1)
     if not args.no_browser:
         webbrowser.open(url)
-    uvicorn.run("app.server:app", host=args.host, port=args.port)
+    print(f"TubeFactory работает: {url}  (остановить: Ctrl+C)")
+    # Access log off: the UI polls every few seconds and would flood the window.
+    uvicorn.run("app.server:app", host=args.host, port=args.port, access_log=False)
