@@ -72,6 +72,22 @@ def _edge(text, voice, path, rate="+0%"):
     return asyncio.run(run())
 
 
+def _openrouter(text, voice, path, settings):
+    """OpenRouter's OpenAI-compatible /audio/speech: same key as the rest of the company."""
+    if voice not in OPENAI_VOICES:
+        voice = "onyx"
+    r = requests.post(
+        "https://openrouter.ai/api/v1/audio/speech",
+        headers={"Authorization": f"Bearer {settings['openrouter_api_key']}"},
+        json={"model": settings["openrouter_tts_model"], "voice": voice, "input": text,
+              "response_format": "mp3"},
+        timeout=180)
+    if r.status_code != 200:
+        raise RuntimeError(f"OpenRouter TTS HTTP {r.status_code}: {r.text[:300]}")
+    open(path, "wb").write(r.content)
+    return None
+
+
 def _openai(text, voice, path, settings):
     if voice not in OPENAI_VOICES:
         voice = "onyx"
@@ -133,6 +149,8 @@ def synthesize(text, voice, path):
     words = None
     if is_demo(settings) and provider == "edge" and settings.get("demo_mode"):
         _demo(text, path)
+    elif provider == "openrouter" and settings.get("openrouter_api_key"):
+        words = _openrouter(text, voice, path, settings)
     elif provider == "openai" and settings.get("openai_api_key"):
         words = _openai(text, voice, path, settings)
     elif provider == "elevenlabs" and settings.get("elevenlabs_api_key"):

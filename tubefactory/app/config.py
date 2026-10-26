@@ -21,11 +21,12 @@ for _d in (DATA, PROJECTS, CHANNELS_DIR):
 DEFAULTS = {
     # OpenRouter: one key for every text and image model.
     "openrouter_api_key": "",
-    "text_model": "anthropic/claude-sonnet-4.5",
-    "fast_text_model": "google/gemini-2.5-flash",
-    "image_model": "google/gemini-2.5-flash-image",
-    # Voice: edge (free Microsoft voices), openai, elevenlabs.
+    "text_model": "anthropic/claude-sonnet-5.5",
+    "fast_text_model": "anthropic/claude-sonnet-5.5",
+    "image_model": "google/gemini-3.1-flash-image",
+    # Voice: edge (free Microsoft voices), openrouter, openai, elevenlabs.
     "tts_provider": "edge",
+    "openrouter_tts_model": "openai/gpt-4o-mini-tts-2025-12-15",
     "openai_api_key": "",
     "openai_tts_model": "gpt-4o-mini-tts",
     "elevenlabs_api_key": "",

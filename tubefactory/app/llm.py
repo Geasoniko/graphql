@@ -67,6 +67,8 @@ def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, rol
         model = agents.model_for(role)
     model = model or settings["fast_text_model" if fast else "text_model"]
     payload = {"model": model, "messages": messages, "temperature": temperature}
+    if role and agents.ROLES.get(role, {}).get("web"):
+        payload["plugins"] = [{"id": "web", "max_results": 8}]
     if max_tokens:
         payload["max_tokens"] = max_tokens
     data = _post(payload, settings, role=role)

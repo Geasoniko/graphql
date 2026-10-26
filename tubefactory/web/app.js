@@ -58,7 +58,7 @@ function options(list, value) {
 
 function voiceOptions(value) {
   const provider = cache.settings.tts_provider;
-  const list = provider === "openai" ? cache.voices.openai : cache.voices.edge;
+  const list = provider === "openai" || provider === "openrouter" ? cache.voices.openai : cache.voices.edge;
   const known = list.some((v) => v.id === value);
   return options(known || !value ? list : [{ id: value, name: value }, ...list], value);
 }
@@ -439,6 +439,7 @@ pages.company = async () => {
         <button class="btn primary" id="c-plan" ${cache.channels.length ? "" : "disabled"}>Директор, что снимаем?</button>
         <button class="btn" id="c-analyze" ${cache.channels.length ? "" : "disabled"}>📊 Отчёт аналитика</button>
         <button class="btn sm" id="c-models">Загрузить список моделей</button>
+        <button class="btn sm" id="c-check">✅ Проверить модели</button>
       </div>
 
       ${Object.entries(byDept).map(([dept, list]) => `
@@ -448,7 +449,7 @@ pages.company = async () => {
               <span class="muted small">${a.calls} задач · $${a.cost.toFixed(3)}</span></div></div>
             <div class="small muted">${esc(a.duty)}</div>
             ${a.kind === "tool" ? `<div class="small"><span class="badge">${a.role === "voice" ? "сервис озвучки из Настроек" : a.role === "animator" ? "ffmpeg" : "YouTube API"}</span></div>`
-              : `<label>Модель<input data-model="${a.role}" list="${a.kind === "image" ? "m-image" : "m-text"}" value="${esc(a.model)}" placeholder="${esc(a.default_model)}"></label>`}
+              : `<label>Модель${a.web ? ' <span class="badge">🌐 поиск в интернете</span>' : ""} <span data-check="${a.role}"></span><input data-model="${a.role}" list="${a.kind === "image" ? "m-image" : "m-text"}" value="${esc(a.model)}" placeholder="${esc(a.default_model)}"></label>`}
             ${a.last ? `<div class="small" title="${esc(a.last.time)}">💬 ${esc(a.last.text).slice(0, 140)}</div>` : ""}
           </div>`).join("")}</div></div>`).join("")}
       <datalist id="m-text"></datalist><datalist id="m-image"></datalist>
@@ -490,6 +491,16 @@ pages.company = async () => {
       $("#m-text").innerHTML = models.filter((m) => m.output.includes("text") && !m.output.includes("image")).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
       $("#m-image").innerHTML = models.filter((m) => m.output.includes("image")).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
       toast(`Моделей: ${models.length}. Начните вводить название в поле модели.`);
+    }, e.target);
+    $("#c-check").onclick = (e) => guard(async () => {
+      const res = await api("/api/agents/check");
+      let bad = 0;
+      for (const [role, r] of Object.entries(res)) {
+        const el = $(`[data-check="${role}"]`);
+        if (!r.ok) bad++;
+        if (el) el.innerHTML = r.ok ? `<span class="badge ok">есть в OpenRouter</span>` : `<span class="badge err">не найдена — выберите другую</span>`;
+      }
+      toast(bad ? `Не найдено моделей: ${bad}. Сначала сохраните изменения, потом проверьте снова.` : "Все модели есть в OpenRouter");
     }, e.target);
     $("#c-save").onclick = (e) => guard(async () => {
       const body = {};
@@ -639,7 +650,8 @@ pages.settings = async () => {
       <label class="check"><input type="checkbox" id="s-demo_mode" ${s.demo_mode ? "checked" : ""}> Демо-режим (без ИИ, заглушки)</label>
 
       <h2 class="wide">Озвучка</h2>
-      <label>Сервис<select id="s-tts_provider">${options([["edge", "Edge TTS — бесплатно"], ["openai", "OpenAI TTS"], ["elevenlabs", "ElevenLabs"]], s.tts_provider)}</select></label>
+      <label>Сервис<select id="s-tts_provider">${options([["edge", "Edge TTS — бесплатно"], ["openrouter", "OpenRouter TTS (тот же ключ)"], ["openai", "OpenAI TTS"], ["elevenlabs", "ElevenLabs"]], s.tts_provider)}</select></label>
+      <label>Модель OpenRouter TTS<input id="s-openrouter_tts_model" value="${esc(s.openrouter_tts_model)}"></label>
       <label>OpenAI API key<input id="s-openai_api_key" value="${esc(s.openai_api_key)}"></label>
       <label>ElevenLabs API key<input id="s-elevenlabs_api_key" value="${esc(s.elevenlabs_api_key)}"></label>
       <div class="wide muted small">Для ElevenLabs в поле «Голос» у канала/проекта укажите voice_id.</div>

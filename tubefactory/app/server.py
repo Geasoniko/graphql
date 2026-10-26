@@ -131,6 +131,24 @@ def put_agents(body: dict = Body(...)):
     return agents.staff()
 
 
+@app.get("/api/agents/check")
+def check_agents():
+    """Compare every agent's model with the live OpenRouter catalogue."""
+    try:
+        catalogue = {m["id"]: m for m in llm.list_models()}
+    except Exception as e:
+        _fail(f"Не удалось получить список моделей OpenRouter: {e}")
+    out = {}
+    for a in agents.staff():
+        if a["kind"] == "tool":
+            continue
+        m = catalogue.get(a["model"])
+        out[a["role"]] = {"ok": bool(m), "name": m["name"] if m else None,
+                          "prompt_price": m["prompt_price"] if m else None,
+                          "image": bool(m) and "image" in m["output"]}
+    return out
+
+
 @app.post("/api/channels/{cid}/plan")
 def plan(cid: str, body: dict = Body(default={})):
     try:
