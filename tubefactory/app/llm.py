@@ -23,6 +23,11 @@ class LLMError(RuntimeError):
     pass
 
 
+# Set once OpenRouter refuses the web search plugin (account/workspace policy);
+# from then on agents that would search the web answer from their own knowledge.
+_web_blocked = False
+
+
 def _headers(settings):
     return {
         "Authorization": f"Bearer {settings['openrouter_api_key']}",
@@ -70,11 +75,21 @@ def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, rol
         model = agents.model_for(role)
     model = model or settings["fast_text_model" if fast else "text_model"]
     payload = {"model": model, "messages": messages, "temperature": temperature}
-    if role and agents.ROLES.get(role, {}).get("web"):
+    global _web_blocked
+    if role and agents.ROLES.get(role, {}).get("web") and not _web_blocked:
         payload["plugins"] = [{"id": "web", "max_results": 8}]
     if max_tokens:
         payload["max_tokens"] = max_tokens
-    data = _post(payload, settings, role=role)
+    try:
+        data = _post(payload, settings, role=role)
+    except LLMError as e:
+        text = str(e).lower()
+        if "plugins" not in payload or not ("plugin" in text or "'web'" in text or "server tool" in text):
+            raise
+        _web_blocked = True
+        company.feed(role, "веб-поиск запрещён в настройках OpenRouter — работаю без него")
+        payload.pop("plugins")
+        data = _post(payload, settings, role=role)
     content = data["choices"][0]["message"].get("content") or ""
     if isinstance(content, list):
         content = "".join(part.get("text", "") for part in content)
