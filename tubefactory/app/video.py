@@ -31,12 +31,16 @@ def _motion_filter(kind, frames, w, h, fps):
             f":s={w}x{h}:fps={fps},setsar=1,format=yuv420p")
 
 
-def render_clip(image, audio, out, seconds, idx, aspect="16:9", fps=30, ken_burns=True):
+def render_clip(image, audio, out, seconds, idx, aspect="16:9", fps=30, ken_burns=True, motion=None):
+    """motion: camera move chosen by the art director (zoom_in, zoom_out, pan_left,
+    pan_right, static); without one the moves rotate scene by scene."""
     w, h = SIZES.get(aspect, SIZES["16:9"])
     total = seconds + PAD
     frames = int(round(total * fps))
-    if ken_burns:
-        vf = _motion_filter(MOTIONS[idx % len(MOTIONS)], frames, w, h, fps)
+    if motion not in MOTIONS and motion != "static":
+        motion = MOTIONS[idx % len(MOTIONS)]
+    if ken_burns and motion != "static":
+        vf = _motion_filter(motion, frames, w, h, fps)
         vin = ["-i", str(image)]
     else:
         vf = f"scale={w}:{h},setsar=1,format=yuv420p,fps={fps}"

@@ -13,6 +13,7 @@ import time
 
 import requests
 
+from . import agents, company
 from .config import is_demo, load_settings
 
 API = "https://openrouter.ai/api/v1"
@@ -31,7 +32,8 @@ def _headers(settings):
     }
 
 
-def _post(payload, settings, timeout=300):
+def _post(payload, settings, timeout=300, role=None):
+    payload = {**payload, "usage": {"include": True}}
     last = None
     for attempt in range(4):
         try:
@@ -50,17 +52,24 @@ def _post(payload, settings, timeout=300):
         data = r.json()
         if data.get("error"):
             raise LLMError(f"OpenRouter: {data['error']}")
+        if role:
+            company.add_cost(role, (data.get("usage") or {}).get("cost", 0))
         return data
     raise LLMError(f"OpenRouter недоступен: {last}")
 
 
-def chat(messages, model=None, temperature=0.8, max_tokens=16000, fast=False):
+def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, role=None):
+    """role: agent from agents.ROLES — picks its model and books the cost to it."""
     settings = load_settings()
     if is_demo(settings):
         raise LLMError("demo")
+    if role and not model:
+        model = agents.model_for(role)
     model = model or settings["fast_text_model" if fast else "text_model"]
-    data = _post({"model": model, "messages": messages,
-                  "temperature": temperature, "max_tokens": max_tokens}, settings)
+    payload = {"model": model, "messages": messages, "temperature": temperature}
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    data = _post(payload, settings, role=role)
     content = data["choices"][0]["message"].get("content") or ""
     if isinstance(content, list):
         content = "".join(part.get("text", "") for part in content)
@@ -102,7 +111,7 @@ def _data_url(path):
     return f"data:{mime};base64,{base64.b64encode(open(path, 'rb').read()).decode()}"
 
 
-def generate_image(prompt, references=(), aspect="16:9", model=None):
+def generate_image(prompt, references=(), aspect="16:9", model=None, role="illustrator"):
     """Return PNG/JPEG bytes. references: image paths used for character consistency."""
     settings = load_settings()
     if is_demo(settings):
@@ -111,13 +120,13 @@ def generate_image(prompt, references=(), aspect="16:9", model=None):
     for ref in references:
         content.append({"type": "image_url", "image_url": {"url": _data_url(ref)}})
     payload = {
-        "model": model or settings["image_model"],
+        "model": model or agents.model_for(role) or settings["image_model"],
         "messages": [{"role": "user", "content": content}],
         "modalities": ["image", "text"],
         "image_config": {"aspect_ratio": aspect},
     }
     for attempt in range(3):
-        data = _post(payload, settings)
+        data = _post(payload, settings, role=role)
         msg = data["choices"][0]["message"]
         for img in msg.get("images") or []:
             url = img.get("image_url", {}).get("url", "")

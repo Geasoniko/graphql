@@ -15,7 +15,7 @@ from .config import CHANNELS_DIR, DATA, PROJECTS
 _lock = threading.RLock()
 _CHANNELS_FILE = DATA / "channels.json"
 
-STAGES = ["script", "characters", "audio", "images", "thumbnail", "render", "upload"]
+STAGES = ["script", "review", "art", "seo", "characters", "audio", "images", "thumbnail", "render", "upload"]
 
 
 def now():
@@ -82,6 +82,9 @@ def get_project(pid):
         p = _read(project_dir(pid) / "project.json", None)
     if p is None:
         raise KeyError(pid)
+    for s in STAGES:  # projects made before a stage existed
+        p["stages"].setdefault(s, {"status": "idle", "progress": 0, "error": None})
+    p["stages"] = {s: p["stages"][s] for s in STAGES}
     return p
 
 
@@ -118,7 +121,12 @@ def delete_project(pid):
     shutil.rmtree(project_dir(pid), ignore_errors=True)
 
 
-def log(pid, message):
+def log(pid, message, role=None):
+    """Project journal; with a role the line also goes to the company feed."""
+    from . import agents, company
+    if role:
+        company.feed(role, message, project_id=pid, channel_id=get_project(pid).get("channel_id"))
+        message = f"{agents.name(role)}: {message}"
     with edit_project(pid) as p:
         p["log"].append(f"{time.strftime('%H:%M:%S')} {message}")
         p["log"] = p["log"][-300:]
@@ -142,6 +150,8 @@ CHANNEL_DEFAULTS = {
     "aspect": "16:9",
     "privacy": "private",
     "autopilot": False,
+    "auto_schedule": True,
+    "best_hours": [],
     "videos_per_day": 1,
     "publish_hours": [15],
     "connected": False,

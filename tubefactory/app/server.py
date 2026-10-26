@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, jobs, llm, pipeline, scenarist, storage, tts, youtube
+from . import agents, analytics, company, config, jobs, llm, pipeline, scenarist, storage, tts, youtube
 from .config import WEB
 
 
@@ -100,6 +100,55 @@ def connect_channel(cid: str):
             print("YouTube auth failed:", e)
     threading.Thread(target=auth, daemon=True).start()
     return {"ok": True, "message": "Откройте окно браузера и войдите в аккаунт канала"}
+
+
+# ---------- company ----------
+
+@app.get("/api/company")
+def company_state():
+    data = company.get()
+    staff = agents.staff()
+    for a in staff:
+        a["cost"] = data["costs"].get(a["role"], 0)
+        a["calls"] = data["calls"].get(a["role"], 0)
+        last = next((f for f in data["feed"] if f["role"] == a["role"]), None)
+        a["last"] = last
+    return {"staff": staff, "feed": data["feed"][:150], "reports": data["reports"],
+            "decisions": data["decisions"], "total_cost": round(sum(data["costs"].values()), 4)}
+
+
+@app.put("/api/agents")
+def put_agents(body: dict = Body(...)):
+    current = config.load_settings().get("agents") or {}
+    for role, model in body.items():
+        if role in agents.ROLES:
+            model = (model or "").strip()
+            if model and model != agents.ROLES[role]["default_model"]:
+                current[role] = {"model": model}
+            else:
+                current.pop(role, None)  # back to the default, follows future default updates
+    config.save_settings({"agents": current})
+    return agents.staff()
+
+
+@app.post("/api/channels/{cid}/plan")
+def plan(cid: str, body: dict = Body(default={})):
+    try:
+        storage.get_channel(cid)
+    except KeyError:
+        raise HTTPException(404, "Канал не найден")
+    try:
+        return jobs.plan_video(cid, start=body.get("start", True))
+    except Exception as e:
+        _fail(e)
+
+
+@app.post("/api/channels/{cid}/analyze")
+def analyze_channel(cid: str):
+    try:
+        return analytics.analyze_channel(cid)
+    except Exception as e:
+        _fail(e)
 
 
 # ---------- scenarist ----------

@@ -97,6 +97,33 @@ def upload(channel_id, video_path, title, description, tags, privacy="private",
     return {"video_id": video_id, "url": f"https://youtu.be/{video_id}"}
 
 
+def channel_videos(channel_id, limit=50):
+    """Latest uploads of the connected channel with their statistics."""
+    yt = _service(channel_id)
+    ch = yt.channels().list(part="contentDetails", mine=True).execute()["items"][0]
+    uploads = ch["contentDetails"]["relatedPlaylists"]["uploads"]
+    items = yt.playlistItems().list(part="contentDetails", playlistId=uploads,
+                                    maxResults=min(limit, 50)).execute().get("items", [])
+    ids = [it["contentDetails"]["videoId"] for it in items]
+    if not ids:
+        return []
+    resp = yt.videos().list(part="snippet,statistics,contentDetails,status", id=",".join(ids)).execute()
+    out = []
+    for v in resp.get("items", []):
+        st = v.get("statistics", {})
+        out.append({
+            "video_id": v["id"],
+            "title": v["snippet"]["title"],
+            "published_at": v["snippet"]["publishedAt"],
+            "privacy": v["status"]["privacyStatus"],
+            "duration": v["contentDetails"]["duration"],
+            "views": int(st.get("viewCount", 0)),
+            "likes": int(st.get("likeCount", 0)),
+            "comments": int(st.get("commentCount", 0)),
+        })
+    return out
+
+
 # ---------- reference videos ----------
 
 def _vtt_to_text(vtt):

@@ -42,6 +42,8 @@ DEFAULTS = {
     # Without any API key the app runs in demo mode with placeholder
     # script, images and voice so the whole pipeline can be tried offline.
     "demo_mode": False,
+    # Per-agent model overrides from the "Компания" page: {role: {"model": "..."}}.
+    "agents": {},
 }
 
 _lock = threading.Lock()
@@ -55,7 +57,7 @@ def load_settings():
             data.update(json.loads(_SETTINGS_FILE.read_text("utf-8")))
     for key in DEFAULTS:
         env = os.environ.get(key.upper())
-        if env is not None:
+        if env is not None and not isinstance(DEFAULTS[key], dict):
             default = DEFAULTS[key]
             if isinstance(default, bool):
                 env = env.lower() in ("1", "true", "yes")

@@ -6,8 +6,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const view = $("#view");
 
 const STAGE_NAMES = {
-  script: "Сценарий", characters: "Персонажи", audio: "Озвучка", images: "Картинки",
-  thumbnail: "Превью", render: "Сборка видео", upload: "YouTube",
+  script: "✍️ Сценарий", review: "🧐 Редактура", art: "🎨 Арт-дирекция", seo: "📣 Маркетинг и теги",
+  characters: "🖌 Персонажи", audio: "🎙 Озвучка", images: "🖌 Кадры",
+  thumbnail: "🖼 Баннер", render: "🎬 Монтаж", upload: "🚀 YouTube",
 };
 const LANGUAGES = ["English", "Русский", "Қазақша", "Español", "Deutsch"];
 
@@ -80,7 +81,7 @@ async function refreshShared() {
   $("#nav-queue").textContent = queue.queued.length + (queue.current ? 1 : 0);
   $("#foot").innerHTML = settings.demo_active
     ? `<span class="badge warn">демо-режим</span><br>Добавьте ключ OpenRouter в Настройках`
-    : `<span class="badge ok">OpenRouter подключён</span><br>${esc(settings.text_model)}`;
+    : `<span class="badge ok">OpenRouter подключён</span>`;
 }
 
 // ---------------- pages ----------------
@@ -279,6 +280,13 @@ function renderProject(p, keepScroll = false) {
       </div>
     </details>
 
+    ${p.director || p.review ? `<div class="grid-2">
+      ${p.director ? `<div class="card"><h2>👔 Решение директора</h2><div class="small pre">${esc(p.director.decision || "")}</div>
+        ${p.director.notes_for_team ? `<div class="small muted" style="margin-top:6px">Команде: ${esc(p.director.notes_for_team)}</div>` : ""}</div>` : ""}
+      ${p.review ? `<div class="card"><h2>🧐 Шеф-редактор: ${esc(p.review.score)}/10${p.review.rewritten ? ' <span class="badge warn">сценарий переписан</span>' : ""}</h2>
+        <div class="small">${esc(p.review.verdict || "")}</div>
+        ${(p.review.problems || []).length ? `<div class="small muted" style="margin-top:6px">${p.review.problems.map((x) => "• " + esc(x)).join("<br>")}</div>` : ""}</div>` : ""}
+    </div>` : ""}
     ${sc ? `
     <div class="card row">
       <div class="tabs grow">${[["scenes", `Сцены (${sc.scenes.length})`], ["characters", `Персонажи (${sc.characters.length})`], ["video", "Видео и YouTube"], ["log", "Журнал"]]
@@ -336,7 +344,9 @@ function renderTab(p) {
         <label>Заголовок<input id="y-title" value="${esc(sc.title)}"></label>
         <label>Описание<textarea id="y-desc" style="min-height:140px">${esc(sc.description)}</textarea></label>
         <label>Теги (через запятую)<input id="y-tags" value="${esc((sc.tags || []).join(", "))}"></label>
+        ${(sc.title_variants || []).length ? `<div class="small muted">Варианты маркетолога: ${sc.title_variants.map((t) => `<a href="#" data-title="${esc(t)}">${esc(t)}</a>`).join(" · ")}</div>` : ""}
         <label>Текст на превью<input id="y-thumb" value="${esc(sc.thumbnail_text || "")}"></label>
+        ${sc.pinned_comment ? `<label>Закреплённый комментарий<input readonly value="${esc(sc.pinned_comment)}"></label>` : ""}
         <div class="row">
           <button class="btn" id="y-save">Сохранить</button>
           <button class="btn primary" id="y-upload" ${!p.output || !p.channel_id || p.busy ? "disabled" : ""}>⬆ Загрузить на YouTube</button>
@@ -386,6 +396,7 @@ function bindProject(p) {
     await api(`/api/projects/${pid}`, { method: "PUT", body: { script: { characters } } });
     toast("Сохранено"); await reload();
   }));
+  $$("[data-title]").forEach((a) => a.onclick = (e) => { e.preventDefault(); $("#y-title").value = a.dataset.title; });
   $("#y-save") && ($("#y-save").onclick = () => guard(async () => { await saveMeta(p); toast("Сохранено"); await reload(); }));
   $("#y-upload") && ($("#y-upload").onclick = () => guard(async () => { await saveMeta(p); await run("upload", true); }));
 }
@@ -408,6 +419,93 @@ function saveMeta(p) {
     } },
   });
 }
+
+// ---------------- company ----------------
+
+pages.company = async () => {
+  const draw = async () => {
+    const c = await api("/api/company");
+    const byDept = {};
+    c.staff.forEach((a) => (byDept[a.department] ||= []).push(a));
+    const reports = Object.entries(c.reports);
+    view.innerHTML = `
+      <div class="card row"><div class="col grow"><h1>🏢 Компания</h1>
+        <div class="muted">Каждый сотрудник — отдельная ИИ-модель OpenRouter, лучшая в своём деле. Директор решает, что снимать, аналитик следит за просмотрами.</div></div>
+        <div class="col" style="align-items:flex-end"><div class="muted small">Потрачено всего</div><div class="stat">$${c.total_cost.toFixed(2)}</div></div></div>
+
+      <div class="card row">
+        <h2 class="grow" style="margin:0">👔 Планёрка</h2>
+        <select id="c-channel" style="max-width:260px">${options(cache.channels.map((ch) => [ch.id, ch.name]))}</select>
+        <button class="btn primary" id="c-plan" ${cache.channels.length ? "" : "disabled"}>Директор, что снимаем?</button>
+        <button class="btn" id="c-analyze" ${cache.channels.length ? "" : "disabled"}>📊 Отчёт аналитика</button>
+        <button class="btn sm" id="c-models">Загрузить список моделей</button>
+      </div>
+
+      ${Object.entries(byDept).map(([dept, list]) => `
+        <div class="card"><h2>${esc(dept)}</h2><div class="grid">${list.map((a) => `
+          <div class="card col" style="background:rgba(5,15,40,.35)">
+            <div class="row"><span style="font-size:24px">${a.emoji}</span><div class="col grow" style="gap:0"><b>${esc(a.name)}</b>
+              <span class="muted small">${a.calls} задач · $${a.cost.toFixed(3)}</span></div></div>
+            <div class="small muted">${esc(a.duty)}</div>
+            ${a.kind === "tool" ? `<div class="small"><span class="badge">${a.role === "voice" ? "сервис озвучки из Настроек" : a.role === "animator" ? "ffmpeg" : "YouTube API"}</span></div>`
+              : `<label>Модель<input data-model="${a.role}" list="${a.kind === "image" ? "m-image" : "m-text"}" value="${esc(a.model)}" placeholder="${esc(a.default_model)}"></label>`}
+            ${a.last ? `<div class="small" title="${esc(a.last.time)}">💬 ${esc(a.last.text).slice(0, 140)}</div>` : ""}
+          </div>`).join("")}</div></div>`).join("")}
+      <datalist id="m-text"></datalist><datalist id="m-image"></datalist>
+      <div class="row"><button class="btn primary" id="c-save">💾 Сохранить модели</button></div>
+
+      ${reports.length ? `<div class="card"><h2>📊 Отчёты аналитика</h2>${reports.map(([cid, r]) => {
+        const ch = cache.channels.find((x) => x.id === cid);
+        return `<div class="card" style="background:rgba(5,15,40,.35);margin-bottom:10px">
+          <div class="row"><b class="grow">${esc(ch ? ch.name : cid)}</b><span class="badge ok">лучшее время: ${(r.best_hours || []).join(":00, ")}:00</span><span class="muted small">${esc(r.time)}</span></div>
+          <div class="small" style="margin-top:6px">${esc(r.summary || "")}</div>
+          <div class="grid-2" style="margin-top:8px">
+            <div class="small"><b>Заходит</b><br>${(r.what_works || []).map((x) => "• " + esc(x)).join("<br>")}</div>
+            <div class="small"><b>Не заходит</b><br>${(r.what_fails || []).map((x) => "• " + esc(x)).join("<br>")}</div>
+            <div class="small"><b>Рекомендации</b><br>${(r.recommendations || []).map((x) => "• " + esc(x)).join("<br>")}</div>
+            <div class="small"><b>Следующие темы</b><br>${(r.next_topics || []).map((x) => "• " + esc(x)).join("<br>")}</div>
+          </div></div>`;
+      }).join("")}</div>` : ""}
+
+      <div class="card"><h2>💬 Лента компании</h2><div class="log" id="c-feed">${feedText(c)}</div></div>`;
+    bindCompany();
+  };
+  const feedText = (c) => c.feed.map((f) => {
+    const a = c.staff.find((x) => x.role === f.role);
+    return `${esc(f.time.slice(5, 16))}  ${a ? a.emoji + " " + esc(a.name) : esc(f.role)}: ${esc(f.text)}`;
+  }).join("\n") || "Пока тихо";
+
+  function bindCompany() {
+    $("#c-plan") && ($("#c-plan").onclick = (e) => guard(async () => {
+      toast("Исследователь ищет тренды, директор выбирает…");
+      const p = await api(`/api/channels/${$("#c-channel").value}/plan`, { body: { start: true } });
+      location.hash = `#/project/${p.id}`;
+    }, e.target));
+    $("#c-analyze") && ($("#c-analyze").onclick = (e) => guard(async () => {
+      await api(`/api/channels/${$("#c-channel").value}/analyze`, { body: {} });
+      toast("Отчёт готов"); await draw();
+    }, e.target));
+    $("#c-models").onclick = (e) => guard(async () => {
+      const models = await api("/api/models");
+      $("#m-text").innerHTML = models.filter((m) => m.output.includes("text") && !m.output.includes("image")).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
+      $("#m-image").innerHTML = models.filter((m) => m.output.includes("image")).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
+      toast(`Моделей: ${models.length}. Начните вводить название в поле модели.`);
+    }, e.target);
+    $("#c-save").onclick = (e) => guard(async () => {
+      const body = {};
+      $$("[data-model]").forEach((el) => body[el.dataset.model] = el.value);
+      await api("/api/agents", { method: "PUT", body });
+      toast("Модели сохранены");
+    }, e.target);
+  }
+
+  await draw();
+  // Only the feed refreshes live, so edits in the model fields are not lost.
+  pollTimer = setInterval(async () => {
+    const c = await api("/api/company").catch(() => null);
+    if (c && $("#c-feed")) $("#c-feed").innerHTML = feedText(c);
+  }, 4000);
+};
 
 // ---------------- queue ----------------
 
@@ -461,7 +559,10 @@ function channelForm(c) {
       <label class="check"><input type="checkbox" data-k="autopilot" ${c.autopilot ? "checked" : ""}> Автопилот</label>
       <label>Видео в день<input data-k="videos_per_day" type="number" min="1" max="10" value="${c.videos_per_day}"></label>
       <label>Часы публикации (локальные, через запятую)<input data-k="publish_hours" value="${(c.publish_hours || []).join(", ")}"></label>
-      <div class="wide"><button class="btn primary" data-save>Сохранить</button></div>
+      <label class="check"><input type="checkbox" data-k="auto_schedule" ${c.auto_schedule !== false ? "checked" : ""}> Аналитик сам выбирает лучшее время${c.best_hours?.length ? ` (сейчас: ${c.best_hours.join(", ")})` : ""}</label>
+      <div class="wide row"><button class="btn primary" data-save>Сохранить</button>
+        <button class="btn" data-plan>👔 Директор, сними видео</button>
+        <button class="btn" data-analyze ${c.connected ? "" : "disabled"}>📊 Отчёт аналитика</button></div>
     </div></div>`;
 }
 
@@ -481,6 +582,15 @@ function bindChannels() {
       toast("Канал сохранён"); await reroute();
     }, e.target);
     $("[data-del]", card).onclick = () => confirm("Удалить канал?") && guard(async () => { await api(`/api/channels/${id}`, { method: "DELETE" }); await reroute(); });
+    $("[data-plan]", card).onclick = (e) => guard(async () => {
+      toast("Планёрка: исследователь ищет тренды, директор выбирает…");
+      const p = await api(`/api/channels/${id}/plan`, { body: { start: true } });
+      location.hash = `#/project/${p.id}`;
+    }, e.target);
+    $("[data-analyze]", card).onclick = (e) => guard(async () => {
+      await api(`/api/channels/${id}/analyze`, { body: {} });
+      location.hash = "#/company";
+    }, e.target);
     $("[data-connect]", card).onclick = () => guard(async () => {
       const r = await api(`/api/channels/${id}/connect`, { body: {} });
       toast(r.message);
@@ -524,11 +634,7 @@ pages.settings = async () => {
     <div class="card form">
       <h2 class="wide">ИИ (OpenRouter)</h2>
       <label class="wide">OpenRouter API key<input id="s-openrouter_api_key" value="${esc(s.openrouter_api_key)}" placeholder="sk-or-v1-..."></label>
-      <label>Модель для сценариев<input id="s-text_model" list="m-text" value="${esc(s.text_model)}"></label>
-      <label>Быстрая модель (идеи)<input id="s-fast_text_model" list="m-text" value="${esc(s.fast_text_model)}"></label>
-      <label>Модель картинок<input id="s-image_model" list="m-image" value="${esc(s.image_model)}"></label>
-      <div class="row"><button class="btn sm" id="s-models">Загрузить список моделей</button></div>
-      <datalist id="m-text"></datalist><datalist id="m-image"></datalist>
+      <div class="wide muted small">Модели для каждого сотрудника выбираются на странице <a href="#/company">Компания</a>.</div>
       <label>Параллельных картинок<input id="s-image_workers" type="number" min="1" max="16" value="${s.image_workers}"></label>
       <label class="check"><input type="checkbox" id="s-demo_mode" ${s.demo_mode ? "checked" : ""}> Демо-режим (без ИИ, заглушки)</label>
 
@@ -549,12 +655,6 @@ pages.settings = async () => {
       <label class="wide">Файл OAuth-клиента Google (client_secret.json)<input id="s-youtube_client_secret" value="${esc(s.youtube_client_secret)}"></label>
       <div class="wide"><button class="btn primary" id="s-save">Сохранить</button></div>
     </div>`;
-  $("#s-models").onclick = (e) => guard(async () => {
-    const models = await api("/api/models");
-    $("#m-text").innerHTML = models.filter((m) => m.output.includes("text") && !m.output.includes("image")).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
-    $("#m-image").innerHTML = models.filter((m) => m.output.includes("image")).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
-    toast(`Загружено моделей: ${models.length}. Начните вводить название в поле.`);
-  }, e.target);
   $("#s-save").onclick = (e) => guard(async () => {
     const body = {};
     $$("[id^='s-']").forEach((el) => {

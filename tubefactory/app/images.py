@@ -60,9 +60,9 @@ def scene_prompt(style, scene, characters):
     return " ".join(p for p in parts if p)
 
 
-def generate(prompt, path, aspect, references=(), label="", seed=0):
+def generate(prompt, path, aspect, references=(), label="", seed=0, role="illustrator"):
     try:
-        data = llm.generate_image(prompt, references=references, aspect=aspect)
+        data = llm.generate_image(prompt, references=references, aspect=aspect, role=role)
     except llm.LLMError as e:
         if str(e) != "demo":
             raise

@@ -1,4 +1,6 @@
 """AI scriptwriter: reference analysis, ideas, full scripts, niche search."""
+import json
+
 from . import llm
 
 SCRIPT_SYSTEM = """You are a senior YouTube scriptwriter for faceless animated storytelling channels
@@ -39,7 +41,8 @@ PACING = {
 }
 
 
-def write_script(idea, language="English", scene_count=20, pacing="calm", style="", reference=""):
+def write_script(idea, language="English", scene_count=20, pacing="calm", style="", reference="",
+                 feedback="", previous=None):
     user = f"""Video idea: {idea}
 
 Video language (narration): {language}
@@ -50,9 +53,12 @@ Pacing: {PACING.get(pacing, PACING['calm'])}
         user += f"Visual style to use: {style}\n"
     if reference:
         user += f"\nCompetitor reference to learn structure/tone from (do not copy text):\n{reference[:12000]}\n"
+    if previous and feedback:
+        user += (f"\nYour previous draft:\n{json.dumps(previous, ensure_ascii=False)[:30000]}\n"
+                 f"\nChief editor feedback — fix all of it in the new version:\n{feedback}\n")
     user += "\n" + SCRIPT_FORMAT
     try:
-        script = llm.chat_json(SCRIPT_SYSTEM, user, temperature=0.9)
+        script = llm.chat_json(SCRIPT_SYSTEM, user, temperature=0.9, role="writer", max_tokens=16000)
     except llm.LLMError as e:
         if str(e) != "demo":
             raise
@@ -118,7 +124,7 @@ JSON format:
 }}
 Give {count} ideas."""
     try:
-        return llm.chat_json(ANALYZE_SYSTEM, user)
+        return llm.chat_json(ANALYZE_SYSTEM, user, role="ref_analyst")
     except llm.LLMError as e:
         if str(e) != "demo":
             raise
@@ -128,7 +134,8 @@ Give {count} ideas."""
 def ideas_for_niche(niche, count=8, avoid=()):
     avoid_txt = "\n".join(f"- {t}" for t in list(avoid)[-60:])
     user = f"""Niche: {niche}
-Propose {count} new viral video ideas for an English-speaking (US) audience.
+Search the web for what is trending right now in this niche on YouTube (recent viral videos,
+rising search queries, news hooks). Propose {count} new viral video ideas for an English-speaking (US) audience.
 Do not repeat these existing titles:
 {avoid_txt or '(none)'}
 
@@ -136,7 +143,7 @@ JSON format:
 {{"analysis": "кратко про нишу (рус.)", "style": "English visual style prompt",
   "ideas": [{{"title": "...", "idea": "...", "hook": "...", "why": "почему зайдёт (рус.)"}}]}}"""
     try:
-        return llm.chat_json(ANALYZE_SYSTEM, user)
+        return llm.chat_json(ANALYZE_SYSTEM, user, role="researcher")
     except llm.LLMError as e:
         if str(e) != "demo":
             raise
@@ -157,7 +164,7 @@ def find_niches(query, count=10):
   "example_titles": ["3 примера заголовков на английском"]
 }}]}}"""
     try:
-        return llm.chat_json(NICHE_SYSTEM, user)
+        return llm.chat_json(NICHE_SYSTEM, user, role="researcher")
     except llm.LLMError as e:
         if str(e) != "demo":
             raise
