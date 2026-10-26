@@ -22,7 +22,7 @@ DEFAULTS = {
     # OpenRouter: one key for every text and image model.
     "openrouter_api_key": "",
     "text_model": "anthropic/claude-sonnet-5.5",
-    "fast_text_model": "anthropic/claude-sonnet-5.5",
+    "fast_text_model": "google/gemini-3.8-flash",
     "image_model": "google/gemini-3.1-flash-image",
     # Voice: edge (free Microsoft voices), openrouter, openai, elevenlabs.
     "tts_provider": "edge",
