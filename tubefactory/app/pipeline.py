@@ -394,5 +394,10 @@ def create_from_idea(idea, channel_id=None, reference="", **overrides):
         ch = storage.get_channel(channel_id)
         for key in ("language", "voice", "style", "scene_count", "pacing", "aspect", "privacy"):
             fields[key] = ch.get(key)
+        hero = (ch.get("brand") or {}).get("hero") or {}
+        if hero.get("description"):
+            # The stylist's mascot stars in every video, so the channel is recognisable.
+            fields["idea"] = (f"{idea}\n\nChannel mascot — use as the main character: "
+                              f"{hero.get('name', 'Hero')} — {hero['description']}")
     fields.update({k: v for k, v in overrides.items() if v not in (None, "")})
     return storage.create_project(**fields)

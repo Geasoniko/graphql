@@ -58,7 +58,7 @@ Pacing: {PACING.get(pacing, PACING['calm'])}
                  f"\nChief editor feedback — fix all of it in the new version:\n{feedback}\n")
     user += "\n" + SCRIPT_FORMAT
     try:
-        script = llm.chat_json(SCRIPT_SYSTEM, user, temperature=0.9, role="writer", max_tokens=16000)
+        script = llm.chat_json(SCRIPT_SYSTEM, user, temperature=0.9, role="writer", max_tokens=32000)
     except llm.LLMError as e:
         if str(e) != "demo":
             raise

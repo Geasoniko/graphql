@@ -72,7 +72,7 @@ JSON: {{
 }}
 Return exactly {len(script['scenes'])} scenes in order."""
     return _ask("art_director", system, user, {"style": channel_style, "characters": [], "scenes": []},
-                max_tokens=16000)
+                max_tokens=32000)
 
 
 # ---------- marketing ----------
@@ -146,3 +146,40 @@ JSON: {{"summary": "...", "what_works": ["..."], "what_fails": ["..."], "recomme
     return _ask("analyst", system, user, {
         "summary": "Демо: данных нет.", "what_works": [], "what_fails": [], "recommendations": [],
         "best_hours": best_hours, "next_topics": []})
+
+
+# ---------- channel stylist ----------
+
+def channel_style(channel, wish="", preset=None):
+    system = """You are the brand stylist of a faceless YouTube channel. You design one consistent visual
+identity so every video, thumbnail, banner and avatar instantly reads as the same channel. Be concrete:
+image models need precise prompts. Reply in JSON only; explanations in Russian, prompts in English."""
+    user = f"""Channel: {channel.get('name')}
+Niche: {channel.get('niche')}
+Language of videos: {channel.get('language')}
+Owner's wish / reference description: {wish or '(none)'}
+Base style to build on: {(preset or {}).get('prompt') or channel.get('style') or '(choose the best for the niche)'}
+
+JSON: {{
+ "style_name": "short name of the style",
+ "why": "почему этот стиль подходит нише (рус.)",
+ "style_prompt": "English style prompt used for EVERY video frame (medium, line, palette, lighting, mood)",
+ "palette": ["#hex", "#hex", "#hex", "#hex"],
+ "hero": {{"name": "...", "description": "English visual description of the recurring mascot character"}},
+ "thumbnail_rules": ["правила превью канала (рус.), 4-6 пунктов"],
+ "channel_names": ["5 English channel name ideas"],
+ "description": "English channel description for the About section, 2 short paragraphs",
+ "keywords": ["10 channel keywords"],
+ "banner_prompt": "English prompt for a 16:9 channel banner in this style; important content centered, no text",
+ "avatar_prompt": "English prompt for a square channel avatar: the hero's face, bold, readable when tiny, no text"
+}}"""
+    demo = {
+        "style_name": (preset or {}).get("name", "Demo style"), "why": "Демо-режим.",
+        "style_prompt": (preset or {}).get("prompt") or channel.get("style") or "flat 2D cartoon",
+        "palette": ["#FAF6E6", "#1B1B1B", "#8B5A2B", "#D7263D"],
+        "hero": {"name": "Ug", "description": "stick-figure caveman with messy brown hair and a fur tunic"},
+        "thumbnail_rules": ["Один герой крупно", "2–3 слова красным маркером"], "channel_names": ["Stick History"],
+        "description": "Demo description", "keywords": ["history"],
+        "banner_prompt": "caveman by a fire, wide landscape", "avatar_prompt": "caveman face",
+    }
+    return _ask("stylist", system, user, demo)

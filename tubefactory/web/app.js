@@ -606,6 +606,7 @@ pages.queue = async () => {
 // ---------------- channels ----------------
 
 pages.channels = async () => {
+  cache.styles = await api("/api/styles").catch(() => []);
   view.innerHTML = `
     <div class="card row"><div class="col grow"><h1>Каналы</h1>
       <div class="muted">У каждого канала своя ниша, стиль и голос. Автопилот сам придумывает идеи, делает видео и загружает их по расписанию.</div></div>
@@ -638,7 +639,44 @@ function channelForm(c) {
       <div class="wide row"><button class="btn primary" data-save>Сохранить</button>
         <button class="btn" data-plan>👔 Директор, сними видео</button>
         <button class="btn" data-analyze ${c.connected ? "" : "disabled"}>📊 Отчёт аналитика</button></div>
-    </div></div>`;
+    </div>
+    ${brandBlock(c)}
+  </div>`;
+}
+
+function brandBlock(c) {
+  const b = c.brand;
+  const ver = encodeURIComponent(b?.time || "");
+  return `<div class="card" style="margin-top:14px;background:rgba(5,15,40,.35)">
+    <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">🖋 Стилист канала</h2>
+      ${b ? `<span class="badge ok">${esc(b.style_name || "стиль готов")}</span>` : '<span class="badge">стиль не задан</span>'}</div>
+    <div class="form">
+      <label>Готовый стиль<select data-preset><option value="">— пусть стилист решит —</option>${options((cache.styles || []).map((x) => [x.id, x.name]), b?.preset)}</select></label>
+      <label class="wide">Пожелания или описание примера<textarea data-wish placeholder="например: как на канале с человечками-палочками про древних людей, бумажный фон, красные надписи маркером"></textarea></label>
+      <div class="wide muted small" data-preset-about></div>
+      <div class="wide"><button class="btn primary" data-stylist>🖋 ${b ? "Переоформить канал" : "Оформить канал"}</button>
+        <span class="muted small">Стилист задаст стиль кадров и героя, нарисует шапку и аватар (~$0.15)</span></div>
+    </div>
+    ${b ? `
+      <div style="margin-top:14px;position:relative">
+        <img src="/channel-media/${c.id}/banner.jpg?v=${ver}" style="width:100%;max-height:240px;object-fit:cover;border-radius:12px;display:block;cursor:zoom-in" data-zoom-src="/channel-media/${c.id}/banner.jpg?v=${ver}">
+        <img src="/channel-media/${c.id}/avatar.jpg?v=${ver}" style="position:absolute;left:18px;bottom:-28px;width:96px;height:96px;border-radius:50%;border:4px solid #0f2252" data-zoom-src="/channel-media/${c.id}/avatar.jpg?v=${ver}">
+      </div>
+      <div class="grid-2" style="margin-top:40px">
+        <div class="col small">
+          <div><b>Почему этот стиль:</b> ${esc(b.why || "")}</div>
+          <div class="row">${(b.palette || []).map((h) => `<span title="${esc(h)}" style="width:28px;height:28px;border-radius:8px;background:${esc(h)};border:1px solid var(--border)"></span>`).join("")}</div>
+          ${b.hero ? `<div><b>Герой канала:</b> ${esc(b.hero.name || "")} — <span class="muted">${esc(b.hero.description || "")}</span></div>` : ""}
+          <div><b>Правила превью:</b><br>${(b.thumbnail_rules || []).map((x) => "• " + esc(x)).join("<br>")}</div>
+        </div>
+        <div class="col small">
+          <div><b>Названия для канала:</b> ${(b.channel_names || []).map(esc).join(" · ")}</div>
+          <label>Описание канала (вставьте в YouTube Studio → Настройка канала)<textarea readonly style="min-height:110px">${esc(b.description || "")}</textarea></label>
+          <div><b>Ключевые слова:</b> <span class="muted">${(b.keywords || []).map(esc).join(", ")}</span></div>
+          <div class="muted">Шапку и аватар скачайте (клик → правой кнопкой «Сохранить») и загрузите в YouTube Studio → Настройка канала → Брендинг.</div>
+        </div>
+      </div>` : ""}
+  </div>`;
 }
 
 function bindChannels() {
@@ -657,6 +695,15 @@ function bindChannels() {
       toast("Канал сохранён"); await reroute();
     }, e.target);
     $("[data-del]", card).onclick = () => confirm("Удалить канал?") && guard(async () => { await api(`/api/channels/${id}`, { method: "DELETE" }); await reroute(); });
+    const presetSel = $("[data-preset]", card);
+    const showAbout = () => { const x = (cache.styles || []).find((st) => st.id === presetSel.value); $("[data-preset-about]", card).textContent = x ? x.about : ""; };
+    presetSel.onchange = showAbout; showAbout();
+    $$("[data-zoom-src]", card).forEach((img) => img.onclick = () => lightbox(img.dataset.zoomSrc));
+    $("[data-stylist]", card).onclick = (e) => guard(async () => {
+      e.target.textContent = "🖋 Стилист работает… (около минуты)";
+      await api(`/api/channels/${id}/stylist`, { body: { preset: presetSel.value || null, wish: $("[data-wish]", card).value } });
+      toast("Канал оформлен: стиль кадров, герой, шапка и аватар готовы"); await reroute();
+    }, e.target);
     $("[data-plan]", card).onclick = (e) => guard(async () => {
       toast("Планёрка: исследователь ищет тренды, директор выбирает…");
       const p = await api(`/api/channels/${id}/plan`, { body: { start: true } });
@@ -817,6 +864,14 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { closeModal(); $$(".lightbox").forEach((x) => x.remove()); }
 });
 
+// Average narration per scene: calm = 2-4 sentences, dynamic = one phrase.
+const SECONDS_PER_SCENE = { calm: 11, dynamic: 4 };
+
+function sceneMinutes(ch) {
+  const m = Math.round((ch.scene_count || 20) * SECONDS_PER_SCENE[ch.pacing || "calm"] / 60);
+  return Math.min(20, Math.max(3, m));
+}
+
 function openNewVideo() {
   if (!cache.channels.length) {
     toast("Сначала создайте канал: у него ниша, стиль и голос для видео");
@@ -833,28 +888,27 @@ function openNewVideo() {
         <label><input type="radio" name="nv-mode" value="idea"><span><b>💡 Своя идея</b><br><span class="muted small">Опишите тему видео сами</span></span></label>
       </div>
       <label id="nv-idea-box" style="display:none">Идея видео (лучше на английском)<textarea id="nv-idea" placeholder="How ancient people navigated without maps"></textarea></label>
-      <div class="col" style="gap:6px"><div class="slider-label">Сцен в видео: <b id="nv-n">${ch0.scene_count || 20}</b> · длина ≈ <b id="nv-min"></b> мин</div>
-        <input type="range" id="nv-scenes" min="5" max="80" step="1" value="${ch0.scene_count || 20}"></div>
+      <div class="col" style="gap:6px"><div class="slider-label">Длина видео: <b id="nv-min"></b> мин · <b id="nv-n"></b> сцен</div>
+        <input type="range" id="nv-len" min="3" max="20" step="1" value="${sceneMinutes(ch0)}"></div>
       <div class="est-box"><div><div class="muted small">Оценка стоимости</div><div class="small muted" id="nv-est-note">тексты + картинки, озвучка бесплатно</div></div><div class="stat" id="nv-est">…</div></div>
       <div class="row" style="justify-content:flex-end"><button class="btn" id="nv-cancel">Отмена</button><button class="btn primary big" id="nv-go">🚀 Запустить</button></div>
     </div></div></div>`;
+  const chosen = () => cache.channels.find((c) => c.id === $("#nv-channel").value) || ch0;
+  const scenesFor = (min) => Math.max(3, Math.round(min * 60 / SECONDS_PER_SCENE[chosen().pacing || "calm"]));
   const upd = async () => {
-    const n = +$("#nv-scenes").value;
+    const min = +$("#nv-len").value, n = scenesFor(min);
+    $("#nv-min").textContent = min;
     $("#nv-n").textContent = n;
-    $("#nv-min").textContent = Math.max(1, Math.round(n * (($("#nv-channel") && cache.channels.find((c) => c.id === $("#nv-channel").value)?.pacing) === "dynamic" ? 4 : 11) / 60));
     const e = await api(`/api/estimate?scenes=${n}`).catch(() => null);
     if (e) $("#nv-est").textContent = "~" + money(e.total);
   };
-  $("#nv-scenes").oninput = upd;
-  $("#nv-channel").onchange = () => {
-    const c = cache.channels.find((x) => x.id === $("#nv-channel").value);
-    $("#nv-scenes").value = c.scene_count || 20; upd();
-  };
+  $("#nv-len").oninput = upd;
+  $("#nv-channel").onchange = () => { $("#nv-len").value = sceneMinutes(chosen()); upd(); };
   $$("[name=nv-mode]").forEach((r) => r.onchange = () => { $("#nv-idea-box").style.display = r.value === "idea" && r.checked ? "" : "none"; });
   $("#nv-cancel").onclick = closeModal;
   $("#nv-back").onclick = (e) => { if (e.target.id === "nv-back") closeModal(); };
   $("#nv-go").onclick = (e) => guard(async () => {
-    const cid = $("#nv-channel").value, scene_count = +$("#nv-scenes").value;
+    const cid = $("#nv-channel").value, scene_count = scenesFor(+$("#nv-len").value);
     const mode = $("[name=nv-mode]:checked").value;
     let p;
     if (mode === "idea") {

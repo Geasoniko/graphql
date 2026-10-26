@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agents, analytics, company, config, jobs, llm, pipeline, pricing, scenarist, storage, system, tts, youtube
+from . import agents, analytics, branding, company, config, jobs, llm, pipeline, pricing, scenarist, storage, styles, system, tts, youtube
 from .config import WEB
 
 
@@ -194,6 +194,31 @@ def plan(cid: str, body: dict = Body(default={})):
         return jobs.plan_video(cid, start=body.get("start", True), scene_count=body.get("scene_count"))
     except Exception as e:
         _fail(e)
+
+
+@app.get("/api/styles")
+def style_presets():
+    return styles.PRESETS
+
+
+@app.post("/api/channels/{cid}/stylist")
+def channel_stylist(cid: str, body: dict = Body(default={})):
+    try:
+        storage.get_channel(cid)
+    except KeyError:
+        raise HTTPException(404, "Канал не найден")
+    try:
+        return branding.style_channel(cid, body.get("wish", ""), body.get("preset"))
+    except Exception as e:
+        _fail(e)
+
+
+@app.get("/channel-media/{cid}/{name}")
+def channel_media(cid: str, name: str):
+    f = (config.CHANNELS_DIR / cid / name).resolve()
+    if f.parent != (config.CHANNELS_DIR / cid).resolve() or f.suffix != ".jpg" or not f.is_file():
+        raise HTTPException(404)
+    return FileResponse(f, headers={"Cache-Control": "no-cache"})
 
 
 @app.post("/api/channels/{cid}/analyze")
