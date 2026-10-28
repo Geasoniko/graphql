@@ -4,11 +4,11 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agents, analytics, branding, company, competitors, config, jobs, llm, pipeline, pricing, scenarist, stats, storage, styles, system, tts, youtube
+from . import agents, analytics, branding, company, competitors, config, prime, jobs, llm, pipeline, pricing, scenarist, stats, storage, styles, system, tts, youtube
 from .config import WEB
 
 
@@ -429,6 +429,15 @@ def project(pid: str):
     scenes = len(sc.get("scenes") or []) or p["scene_count"]
     p["estimate"] = pricing.estimate(scenes, len(sc.get("characters") or []) or 2,
                                      planned=bool(p.get("director")), image_model=p.get("image_model"))
+    if p.get("kind") == "prime":
+        pk = p["prime"].get("package") or {}
+        pics = scenes + len(pk.get("characters") or []) or scenes + 2
+        art = round(pics * pricing.per_image(agents.model_for("illustrator")), 4)
+        p["estimate"] = {"total": round(0.25 + art, 2), "by_role": {"researcher": 0.05, "writer": 0.2, "illustrator": art},
+                         "live_prices": p["estimate"]["live_prices"]}
+        p["prime"]["flow"] = [prime.flow_path(pid, i).exists() for i in range(scenes)]
+        if pk:
+            p["prime"]["agent"] = prime.agent_block(pk)
     return p
 
 
@@ -477,6 +486,91 @@ def clear_errors(pid: str):
         _fail("Проект сейчас в работе — ошибки уберутся сами при следующем запуске")
     pipeline.clear_errors(pid)
     return {"ok": True}
+
+
+# ---------- prime video ----------
+
+@app.post("/api/prime/topics")
+def prime_topics(body: dict = Body(default={})):
+    ch = None
+    if body.get("channel_id"):
+        try:
+            ch = storage.get_channel(body["channel_id"])
+        except KeyError:
+            pass
+    try:
+        with company.booking(lambda role, cost: None):
+            return prime.topics(ch, body.get("hint", ""))
+    except Exception as e:
+        _fail(e)
+
+
+@app.post("/api/prime")
+def create_prime(body: dict = Body(...)):
+    topic = body.get("topic")
+    if isinstance(topic, str):
+        topic = {"title": topic.strip()}
+    if not topic or not topic.get("title"):
+        _fail("Выберите тему или впишите свою")
+    p = pipeline.create_prime(topic, body.get("channel_id") or None, int(body.get("clips") or 6))
+    jobs.enqueue(p["id"])
+    return p
+
+
+@app.get("/api/projects/{pid}/prime.md")
+def prime_markdown(pid: str):
+    p = _project(pid)
+    if not (p.get("prime") or {}).get("package"):
+        _fail("Пакет ещё не готов")
+    return PlainTextResponse(prime.markdown(p), headers={
+        "Content-Disposition": f'attachment; filename="prime_{pid}.md"'}, media_type="text/markdown; charset=utf-8")
+
+
+@app.post("/api/projects/{pid}/prime/clips/{idx}/video")
+async def prime_upload_clip(pid: str, idx: int, request: Request):
+    """A clip the owner animated in Google Flow (raw request body)."""
+    p = _project(pid)
+    if p.get("kind") != "prime" or not 0 <= idx < len((p.get("script") or {}).get("scenes") or []):
+        _fail("Нет такого клипа")
+    path = prime.flow_path(pid, idx)
+    path.parent.mkdir(exist_ok=True)
+    tmp = path.with_suffix(".part")
+    size = 0
+    with open(tmp, "wb") as f:
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > 400 * 1024 * 1024:
+                break
+            f.write(chunk)
+    if size > 400 * 1024 * 1024 or size == 0:
+        tmp.unlink(missing_ok=True)
+        _fail("Нужен видеофайл до 400 МБ")
+    tmp.replace(path)
+    with storage.edit_project(pid) as p2:
+        if p2["stages"]["render"]["status"] == "done":
+            p2["stages"]["render"]["status"] = "stale"
+    storage.log(pid, f"загружен клип C{idx + 1:02d} из Google Flow")
+    return {"ok": True}
+
+
+@app.delete("/api/projects/{pid}/prime/clips/{idx}/video")
+def prime_delete_clip(pid: str, idx: int):
+    _project(pid)
+    prime.flow_path(pid, idx).unlink(missing_ok=True)
+    return {"ok": True}
+
+
+@app.post("/api/projects/{pid}/prime/characters/{cid}/sheet")
+def prime_sheet(pid: str, cid: str):
+    p = _project(pid)
+    if not any(c["id"] == cid for c in ((p.get("prime") or {}).get("package") or {}).get("characters", [])):
+        _fail("Нет такого героя")
+    try:
+        with company.booking(lambda role, cost: storage.add_cost(pid, role, cost)):
+            prime.draw_sheet(pid, cid)
+    except Exception as e:
+        _fail(e)
+    return _project(pid)
 
 
 @app.post("/api/projects/{pid}/run")

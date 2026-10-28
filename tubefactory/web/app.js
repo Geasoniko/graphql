@@ -203,7 +203,7 @@ function projectCard(p) {
   else if (err) status = `<span class="badge err">ошибка: ${STAGE_NAMES[err[0]]}</span>`;
   return `<div class="card project-card" onclick="location.hash='#/project/${p.id}'">
     <div class="thumb" style="background-image:url('${media(p.id, p.thumbnail)}')"></div>
-    <div class="body"><h3>${esc(p.title)}</h3>
+    <div class="body"><h3>${p.kind === "prime" ? "⭐ " : ""}${esc(p.title)}</h3>
       <div class="row small muted">${status}<span>${p.scenes} сцен</span>${p.cost?.total ? `<span>💰 ${money(p.cost.total)}</span>` : ""}${p.duration ? `<span>${(p.duration / 60).toFixed(1)} мин</span>` : ""}${ch ? `<span>📺 ${esc(ch.name)}</span>` : ""}</div>
     </div></div>`;
 }
@@ -280,7 +280,8 @@ let projectTab = "scenes";
 
 pages.project = async (pid) => {
   const p = await api(`/api/projects/${pid}`);
-  renderProject(p);
+  const renderProject_ = p.kind === "prime" ? renderPrime : renderProject;
+  renderProject_(p);
   pollTimer = setInterval(async () => {
     const fresh = await api(`/api/projects/${pid}`).catch(() => null);
     if (!fresh) return;
@@ -288,19 +289,23 @@ pages.project = async (pid) => {
     const editing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
     if (fresh.busy || fresh.updated_at !== p.updated_at) {
       updateProgress(fresh);
-      if (!editing && fresh.updated_at !== p.updated_at) { Object.assign(p, fresh); renderProject(p, true); }
+      if (!editing && fresh.updated_at !== p.updated_at) { Object.assign(p, fresh); renderProject_(p, true); }
     }
   }, 2000);
 };
 
 const STEP_STATUS = { done: "готово", running: "идёт", error: "ошибка", stale: "устарело", idle: "ждёт" };
 
+const PRIME_STAGE_NAMES = { script: "📜 Пакет", characters: "🧍 Листы героев", images: "🖼 Стартовые кадры",
+  audio: "🎙 Озвучка", render: "🎬 Сборка", upload: "🚀 YouTube" };
+
 function stepHTML(p, k, st) {
+  const names = p.kind === "prime" ? PRIME_STAGE_NAMES : STAGE_NAMES;
   const locked = p.busy || (!p.script && k !== "script");
   const label = st.status === "running" ? `идёт · ${st.note ? `${st.note} · ` : ""}${st.progress}%` : STEP_STATUS[st.status] || st.status;
   return `<div class="step ${st.status} ${locked ? "locked" : ""}" id="stage-${k}" data-step="${k}"
     title="${locked ? "" : st.status === "done" ? "Нажмите, чтобы переделать этап" : "Нажмите, чтобы запустить этап"}">
-    <div class="n">${STAGE_NAMES[k]}</div><div class="st">${label}</div>
+    <div class="n">${names[k]}</div><div class="st">${label}</div>
     <div class="fill" style="width:${st.status === "idle" ? 0 : st.progress}%"></div></div>`;
 }
 
@@ -835,6 +840,181 @@ pages.niches = async () => {
   }, e.target);
 };
 
+// ---------------- prime video (9:16 stickman Short, Google Flow workflow) ----------------
+
+const copyBox = (text, rows = 6) => `<div class="copy-box"><textarea readonly rows="${rows}">${esc(text || "")}</textarea>
+  <button class="btn sm" data-copy>📋 Копировать</button></div>`;
+
+function openPrime() {
+  $("#modal-root").innerHTML = `<div class="modal-back" id="pv-back"><div class="modal" style="width:min(760px,100%)">
+    <h2>⭐ Прайм-видео — исторический Shorts</h2>
+    <div class="muted small" style="margin-bottom:12px">Вертикальное 9:16, 60 секунд = 6 клипов по 10 с. Команда пишет весь пакет (факты с источниками, сценарий, героев, промпты для Google Flow), рисует листы героев и стартовые кадры, озвучивает. Вы анимируете клипы в Google Flow и загружаете их — софт соберёт и выложит Shorts. Тексты и картинки ≈ $0.3–0.6.</div>
+    <div class="col" style="gap:12px">
+      <label>Канал<select id="pv-channel">${options([...cache.channels.map((c) => [c.id, c.name]), ["", "— без канала —"]], cache.channels[0]?.id || "")}</select></label>
+      <label>Своя тема или пожелание <span class="muted">(необязательно)</span><input id="pv-topic" placeholder="например: The Great Emu War, 1932 — или: необычные события Средневековья"></label>
+      <div class="row"><button class="btn primary" id="pv-ideas">💡 Предложить 8 тем</button>
+        <button class="btn" id="pv-own">▶ Сделать по моей теме</button><span class="grow"></span><button class="btn" id="pv-cancel">Отмена</button></div>
+      <div id="pv-list"></div>
+    </div></div></div>`;
+  $("#pv-cancel").onclick = closeModal;
+  $("#pv-back").onclick = (e) => { if (e.target.id === "pv-back") closeModal(); };
+  const create = (topic, btn) => guard(async () => {
+    const p = await api("/api/prime", { body: { channel_id: $("#pv-channel").value || null, topic } });
+    closeModal(); toast("Пакет пишется — 2–4 минуты"); location.hash = `#/project/${p.id}`;
+  }, btn);
+  $("#pv-own").onclick = (e) => {
+    const t = $("#pv-topic").value.trim();
+    if (!t) return toast("Впишите тему или нажмите «Предложить 8 тем»", true);
+    create(t, e.target);
+  };
+  $("#pv-ideas").onclick = (e) => guard(async () => {
+    $("#pv-list").innerHTML = '<div class="card"><div class="spinner"></div> Исследователь подбирает темы… (~30 с)</div>';
+    const r = await api("/api/prime/topics", { body: { channel_id: $("#pv-channel").value || null, hint: $("#pv-topic").value } });
+    $("#pv-list").innerHTML = `${r.why ? `<div class="card small">⭐ <b>Рекомендую тему ${(r.recommended ?? 0) + 1}:</b> ${esc(r.why)}</div>` : ""}
+      <div class="col">${(r.topics || []).map((t, i) => `<div class="card col" style="gap:4px;${i === r.recommended ? "border-color:var(--ok)" : ""}">
+        <div class="row"><b class="grow">${i + 1}. ${esc(t.title)}</b><span class="badge">${esc(t.difficulty || "")}</span>${i === r.recommended ? '<span class="badge ok">рекомендую</span>' : ""}</div>
+        <div class="small muted">${esc(t.date_place || "")}</div>
+        <div class="small">${esc(t.premise || "")}</div>
+        <div class="small"><b>Первые 2 секунды:</b> ${esc(t.opening_visual || "")}</div>
+        <div class="small"><b>Конфликт:</b> ${esc(t.conflict || "")} · <b>Итог:</b> ${esc(t.outcome || "")}</div>
+        <div><button class="btn sm primary" data-pick-topic="${i}">Выбрать эту тему</button></div></div>`).join("")}</div>`;
+    $$("[data-pick-topic]").forEach((b) => b.onclick = () => create(r.topics[b.dataset.pickTopic], b));
+  }, e.target);
+}
+
+function renderPrime(p, keepScroll = false) {
+  const y = window.scrollY;
+  setTitle("⭐ Прайм-видео");
+  const pk = p.prime?.package;
+  const scenes = p.script?.scenes || [];
+  const order = ["script", "characters", "images", "audio", "render", "upload"];
+  const flowCount = (p.prime?.flow || []).filter(Boolean).length;
+  view.innerHTML = `
+    <div class="card row">
+      <div class="col grow" style="gap:2px"><h1>⭐ ${esc(p.title)}</h1>
+        <div class="muted small">${esc(p.prime?.topic?.date_place || "")} · 9:16 · ${scenes.length || p.scene_count} клипов × 10 с · создан ${esc(p.created_at)}</div></div>
+      ${pk ? `<a class="btn" href="/api/projects/${p.id}/prime.md" download>📥 Пакет (.md)</a>` : ""}
+      ${p.busy ? `<button class="btn danger" id="p-stop">■ Стоп</button>` : ""}
+      <button class="btn primary" id="p-run" ${p.busy ? "disabled" : ""}>▶ ${pk ? "Продолжить" : "Запустить"}</button>
+      <button class="btn danger" id="p-del">🗑</button>
+    </div>
+    <div class="card">
+      <div class="stepper">${order.map((k) => stepHTML(p, k, p.stages[k])).join("")}</div>
+      ${order.filter((k) => p.stages[k].status === "error").map((k) =>
+        `<div class="alert" style="margin-top:10px">⚠️ <b>${PRIME_STAGE_NAMES[k]}</b>: ${esc(p.stages[k].error || "")}</div>`).join("")}
+    </div>
+    ${costCard(p)}
+    ${!pk ? `<div class="card"><div class="spinner"></div> Пишется пакет: исследователь проверяет факты, сценарист пишет историю, героев и промпты всех клипов…</div>` : `
+    <div class="card"><h2>🧭 Что делать дальше</h2><ol class="small" style="margin:0;padding-left:20px;line-height:1.7">
+      <li>Проверьте <b>факты</b> и <b>листы героев</b> ниже (лист можно перерисовать).</li>
+      <li>Для каждого клипа: скачайте <b>стартовый кадр</b>, в Google Flow загрузите его как первый кадр и вставьте <b>промпт анимации</b> (📋).</li>
+      <li>Готовый ролик из Flow загрузите в карточку клипа (⬆). Загружено: <b>${flowCount} из ${scenes.length}</b>. Клип без видео будет собран из стартового кадра с плавным зумом.</li>
+      <li>Нажмите <b>🎬 Собрать Shorts</b> — озвучка, субтитры и музыка добавятся сами, каждый клип подгонится к 10 с.</li>
+      <li>Проверьте видео и нажмите <b>⬆ Загрузить на YouTube</b>.</li></ol></div>
+    <details class="card"><summary><b>📚 1. Факты и источники</b> ${pk.facts?.verified === false ? '<span class="badge warn">проверка не выполнена</span>' : ""}</summary>
+      <div class="col small" style="margin-top:10px">
+        <div>${esc(pk.facts?.brief || "")}</div>
+        ${["date", "location", "people", "cause", "turning_point", "outcome", "uncertain"].filter((k) => pk.facts?.[k]).map((k) => `<div><b>${k.replace("_", " ")}:</b> ${esc(pk.facts[k])}</div>`).join("")}
+        <div><b>Источники:</b><br>${(pk.facts?.sources || []).map((s) => `• <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || s.url)}</a>`).join("<br>") || "—"}</div>
+        ${pk.dramatization ? `<div><b>Что инсценировано:</b> ${esc(pk.dramatization)}</div>` : ""}
+      </div></details>
+    <details class="card"><summary><b>📝 2. Сценарий по клипам</b></summary>
+      <table class="small" style="width:100%;border-collapse:collapse;margin-top:10px">
+        <tr class="muted"><td>Клип</td><td>Время</td><td>Текст диктора</td><td>Действие</td><td>Зачем</td></tr>
+        ${pk.clips.map((c) => `<tr><td>C${String(c.clip).padStart(2, "0")}</td><td>${esc(c.time || "")}</td><td>${esc(c.narration || "")}</td><td>${esc(c.action || "")}</td><td>${esc(c.purpose || "")}</td></tr>`).join("")}
+      </table></details>
+    <details class="card" open><summary><b>🧍 3. Герои и листы-эталоны</b></summary>
+      <div class="col" style="margin-top:10px">${pk.characters.map((c) => `<div class="card col" style="gap:8px;background:rgba(5,15,40,.35)">
+        <div class="row"><b class="grow">${esc(c.id)} — ${esc(c.name || "")}</b>${(c.palette || []).map((h) => `<span title="${esc(h)}" style="width:20px;height:20px;border-radius:6px;background:${esc(h)};border:1px solid var(--border)"></span>`).join("")}</div>
+        <div class="small muted">${esc(c.role || "")} · реквизит: ${esc(c.prop || "—")} · не меняется: ${esc(c.immutable || "")}</div>
+        ${c.sheet ? `<img src="${media(p.id, c.sheet)}" style="width:100%;max-width:720px;border-radius:10px;cursor:zoom-in" data-zoom-src="${media(p.id, c.sheet)}">` : '<div class="muted small">Лист ещё не нарисован.</div>'}
+        <div class="row"><button class="btn sm" data-sheet="${esc(c.id)}" ${p.busy ? "disabled" : ""}>🖌 ${c.sheet ? "Перерисовать лист" : "Нарисовать лист"}</button>
+          ${c.sheet ? `<a class="btn sm" href="${media(p.id, c.sheet)}" download="${esc(c.id)}_sheet.png">⬇ Скачать для Flow</a>` : ""}</div>
+        <div class="small"><b>Абзац-идентичность</b> (вставляется во все промпты):</div>${copyBox(c.identity, 4)}
+        <div class="small"><b>CHARACTER REFERENCE SHEET PROMPT</b></div>${copyBox(c.reference_sheet_prompt, 6)}
+      </div>`).join("")}</div></details>
+    <details class="card"><summary><b>🛡 4. Агент согласованности</b> <span class="muted small">— вставьте в отдельный чат, чтобы он проверял кадры</span></summary>
+      <div style="margin-top:10px">${copyBox(p.prime.agent, 12)}</div></details>
+    <div class="card"><h2>🎞 5. Клипы</h2><div class="col">${pk.clips.map((c, i) => {
+      const s = scenes[i] || {};
+      const flow = p.prime?.flow?.[i];
+      const name = `C${String(i + 1).padStart(2, "0")}`;
+      return `<div class="card col" style="gap:8px;background:rgba(5,15,40,.35)">
+        <div class="row"><b class="grow">${name} · ${esc(c.time || "")} · ${esc(c.purpose || "")}</b>${flow ? '<span class="badge ok">видео из Flow загружено</span>' : '<span class="badge">ждёт видео из Flow</span>'}</div>
+        <div class="small"><b>Диктор:</b> ${esc(c.narration || "")}</div>
+        <div class="prime-media">
+          <div class="col" style="gap:6px">${s.image ? `<img src="${media(p.id, s.image)}" class="prime-frame" data-zoom-src="${media(p.id, s.image)}">` : '<div class="prime-frame empty">нет кадра</div>'}
+            <div class="row"><button class="btn sm" data-regen="${i}" ${p.busy ? "disabled" : ""}>🖼 ${s.image ? "Перерисовать" : "Нарисовать"}</button>
+              ${s.image ? `<a class="btn sm" href="${media(p.id, s.image)}" download="${name}_scene.png">⬇</a>` : ""}</div>
+            ${s.error ? `<div class="small" style="color:var(--err)">${esc(s.error)}</div>` : ""}</div>
+          <div class="col" style="gap:6px">${flow ? `<video src="/media/${p.id}/flow/${name}.mp4?v=${Date.now() % 1e7}" controls class="prime-frame"></video>` : '<div class="prime-frame empty">видео из Flow<br>ещё нет</div>'}
+            <div class="row"><label class="btn sm primary" style="cursor:pointer">⬆ ${flow ? "Заменить" : "Загрузить"} видео<input type="file" accept="video/*" data-flow="${i}" hidden></label>
+              ${flow ? `<button class="btn sm danger" data-flow-del="${i}">✕</button>` : ""}</div></div>
+        </div>
+        ${s.audio ? `<audio controls src="${media(p.id, s.audio)}" style="width:100%"></audio>` : ""}
+        <div class="small"><b>Героев прикрепить:</b> ${esc((c.characters || []).join(", ") || "—")}</div>
+        <div class="small"><b>Промпт стартового кадра</b></div>${copyBox(c.scene_prompt, 5)}
+        <div class="small"><b>Промпт анимации (10 с) — для Google Flow</b></div>${copyBox(c.animation_prompt, 6)}
+        <div class="small muted"><b>Звук:</b> ${esc(c.sound || "")}<br><b>Последний кадр:</b> ${esc(c.outgoing_state || "")} ${c.cut ? `(${esc(c.cut)})` : ""}</div>
+      </div>`; }).join("")}</div></div>
+    <div class="card"><h2>🎬 6. Сборка и публикация</h2>
+      <div class="row"><button class="btn primary" id="pv-build" ${p.busy || !scenes.every((s) => s.audio) ? "disabled" : ""}>🎬 Собрать Shorts</button>
+        <span class="muted small">${scenes.every((s) => s.audio) ? `Клипов из Flow: ${flowCount} из ${scenes.length}` : "Сначала дождитесь озвучки"}</span></div>
+      ${p.output ? `<video src="${media(p.id, p.output)}" controls style="width:100%;max-width:360px;border-radius:12px;margin-top:12px;display:block"></video>
+        <div class="row" style="margin-top:10px"><a class="btn" href="${media(p.id, p.output)}" download="${esc(p.title)}.mp4">⬇ Скачать</a>
+          <button class="btn primary" id="pv-upload" ${p.busy || !p.channel_id ? "disabled" : ""}>⬆ Загрузить на YouTube</button>
+          ${p.youtube ? `<a class="btn" href="${esc(p.youtube.url)}" target="_blank">▶ Открыть на YouTube</a>` : ""}
+          ${p.channel_id ? "" : '<span class="muted small">Выберите канал в настройках проекта, чтобы загрузить</span>'}</div>` : ""}
+      <div class="small" style="margin-top:12px"><b>Название:</b> ${esc(p.script?.title || "")}</div>
+      ${copyBox(p.script?.description, 4)}
+    </div>`}`;
+  if (keepScroll) window.scrollTo(0, y);
+  bindPrime(p);
+}
+
+function bindPrime(p) {
+  const pid = p.id;
+  const reload = async () => { const fresh = await api(`/api/projects/${pid}`); Object.assign(p, fresh); renderPrime(p, true); };
+  const run = (stage, force) => guard(async () => { await api(`/api/projects/${pid}/run`, { body: { stage, force } }); toast("Добавлено в очередь"); await reload(); });
+  $("#p-run").onclick = () => run("all", false);
+  $("#p-stop") && ($("#p-stop").onclick = () => guard(async () => { await api(`/api/projects/${pid}/stop`, { body: {} }); toast("Останавливаю…"); }));
+  $("#p-del").onclick = () => confirm("Удалить прайм-видео со всеми файлами?") && guard(async () => { await api(`/api/projects/${pid}`, { method: "DELETE" }); location.hash = "#/projects"; });
+  $(".stepper").onclick = (e) => {
+    const b = e.target.closest("[data-step]");
+    if (!b || b.classList.contains("locked")) return;
+    const k = b.dataset.step, done = b.classList.contains("done");
+    if (done ? confirm(`Переделать этап «${PRIME_STAGE_NAMES[k]}» с нуля?`) : confirm(`Запустить этап «${PRIME_STAGE_NAMES[k]}»?`)) run(k, done);
+  };
+  $$("[data-copy]").forEach((b) => b.onclick = async () => {
+    const text = b.previousElementSibling.value;
+    try { await navigator.clipboard.writeText(text); } catch { b.previousElementSibling.select(); document.execCommand("copy"); }
+    toast("Скопировано");
+  });
+  $$("[data-zoom-src]").forEach((img) => img.onclick = () => lightbox(img.dataset.zoomSrc));
+  $$("[data-sheet]").forEach((b) => b.onclick = () => guard(async () => {
+    b.textContent = "🖌 Рисую…"; await api(`/api/projects/${pid}/prime/characters/${b.dataset.sheet}/sheet`, { body: {} });
+    toast("Лист героя готов"); await reload();
+  }, b));
+  $$("[data-regen]").forEach((b) => b.onclick = () => guard(async () => {
+    b.textContent = "🖼 Рисую…";
+    await api(`/api/projects/${pid}/scenes/${b.dataset.regen}/regenerate`, { body: { what: "image" } });
+    toast("Кадр готов"); await reload();
+  }, b));
+  $$("[data-flow]").forEach((inp) => inp.onchange = () => guard(async () => {
+    const file = inp.files[0];
+    if (!file) return;
+    toast(`Загружаю ${file.name}…`);
+    const res = await fetch(`/api/projects/${pid}/prime/clips/${inp.dataset.flow}/video`, { method: "POST", body: file });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `Ошибка ${res.status}`);
+    toast("Клип загружен"); await reload();
+  }));
+  $$("[data-flow-del]").forEach((b) => b.onclick = () => confirm("Убрать видео этого клипа?") && guard(async () => {
+    await api(`/api/projects/${pid}/prime/clips/${b.dataset.flowDel}/video`, { method: "DELETE" }); await reload();
+  }));
+  $("#pv-build") && ($("#pv-build").onclick = () => run("render", true));
+  $("#pv-upload") && ($("#pv-upload").onclick = () => confirm("Загрузить Shorts на YouTube?") && run("upload", true));
+}
+
 // ---------------- statistics (YouTube Analytics, free, no AI) ----------------
 
 const fmtNum = (n) => Math.round(n || 0).toLocaleString("ru-RU");
@@ -1273,6 +1453,7 @@ function openNewVideo() {
 }
 window.openNewVideo = openNewVideo;
 $("#new-video").onclick = openNewVideo;
+$("#prime-video").onclick = openPrime;
 
 // ---------------- router ----------------
 

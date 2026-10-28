@@ -252,3 +252,11 @@ input[type="range"] { padding: 0; accent-color: var(--accent-2); }
   .card table { display: block; overflow-x: auto; white-space: nowrap; }
   .card table td { padding-right: 10px; }
 }
+
+/* prime video */
+.copy-box { position: relative; }
+.copy-box textarea { width: 100%; font-size: 12px; font-family: ui-monospace, Consolas, monospace; padding-right: 110px; resize: vertical; }
+.copy-box [data-copy] { position: absolute; top: 6px; right: 6px; }
+.prime-media { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 12px; }
+.prime-frame { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 10px; background: #050f28; cursor: zoom-in; }
+.prime-frame.empty { display: grid; place-items: center; text-align: center; color: var(--muted); font-size: 12px; cursor: default; border: 1px dashed var(--border); }

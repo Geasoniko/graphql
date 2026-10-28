@@ -10,7 +10,7 @@ import shutil
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from . import agents, company, images, pricing, scenarist, storage, team, tts, video, youtube
+from . import agents, company, images, prime, pricing, scenarist, storage, team, tts, video, youtube
 from pathlib import Path
 
 from .config import load_settings
@@ -643,6 +643,11 @@ def clear_errors(pid):
                           error=None)
 
 
+PRIME_FUNCS = {"script": prime.stage_package, "characters": prime.stage_sheets, "images": prime.stage_frames,
+               "audio": lambda pid, force=False: stage_audio(pid, force), "render": prime.stage_assemble,
+               "upload": lambda pid, force=False: stage_upload(pid, force)}
+
+
 def run(pid, stage="all", force=False):
     clear_errors(pid)
     _over_budget.discard(pid)
@@ -654,15 +659,20 @@ def run(pid, stage="all", force=False):
 
 
 def _finished(p, stage):
+    if p.get("kind") == "prime" and stage == "script":
+        return bool((p.get("prime") or {}).get("package"))
     if stage == "script" and p["script"] or stage == "thumbnail" and p["thumbnail"]:
         return True  # these stages keep their result even after a later error
     return p["stages"][stage]["status"] == "done"
 
 
 def _run(pid, stage, force):
-    order = list(STAGE_FUNCS) if stage == "all" else [stage]
     p = get_project(pid)
-    if stage == "all" and not p["auto_upload"]:
+    funcs = PRIME_FUNCS if p.get("kind") == "prime" else STAGE_FUNCS
+    order = list(funcs) if stage == "all" else [stage]
+    if stage == "all" and p.get("kind") == "prime":
+        order = ["script", "characters", "images", "audio"]  # then the owner animates clips in Google Flow
+    elif stage == "all" and not p["auto_upload"]:
         order.remove("upload")
     current = None
     try:
@@ -672,7 +682,7 @@ def _run(pid, stage, force):
                     set_stage(pid, current, status="done", progress=100, error=None)
                 continue  # finished stages are kept; a stop is reported on the stage that still has work
             _check(pid)
-            STAGE_FUNCS[current](pid, force=force and stage != "all")
+            funcs[current](pid, force=force and stage != "all")
             if get_project(pid)["stages"][current]["status"] != "done":
                 # A stage whose result already existed returns early; clear its old error.
                 set_stage(pid, current, status="done", progress=100, error=None)
@@ -688,7 +698,7 @@ def _run(pid, stage, force):
 def regenerate_scene(pid, idx, what):
     with company.booking(lambda role, cost: storage.add_cost(pid, role, cost)):
         if what in ("image", "both"):
-            _scene_image(pid, idx)
+            (prime.draw_frame if get_project(pid).get("kind") == "prime" else _scene_image)(pid, idx)
         if what in ("audio", "both"):
             _scene_audio(pid, idx, get_project(pid)["voice"])
     with edit_project(pid) as p:
@@ -714,3 +724,19 @@ def create_from_idea(idea, channel_id=None, reference="", **overrides):
                               f"{hero.get('name', 'Hero')} — {hero['description']}")
     fields.update({k: v for k, v in overrides.items() if v not in (None, "")})
     return storage.create_project(**fields)
+
+
+def create_prime(topic, channel_id=None, clips=6):
+    """A prime video project: 9:16 stickman Short made from the instruction sheet."""
+    fields = {"idea": topic.get("title", ""), "channel_id": channel_id, "aspect": "9:16", "pacing": "calm",
+              "scene_count": clips, "language": "English", "title": topic.get("title") or "Прайм-видео"}
+    if channel_id:
+        ch = storage.get_channel(channel_id)
+        fields.update(voice=ch.get("voice"), voice_provider=ch.get("voice_provider"), privacy=ch.get("privacy"))
+    p = storage.create_project(**{k: v for k, v in fields.items() if v not in (None, "")})
+    with edit_project(p["id"]) as p2:
+        p2["kind"] = "prime"
+        p2["prime"] = {"topic": topic, "clips": clips, "package": None}
+        for k in prime.SKIPPED:
+            p2["stages"][k].update(status="done", progress=100)
+    return get_project(p["id"])
