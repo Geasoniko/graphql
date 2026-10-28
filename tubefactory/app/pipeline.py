@@ -9,7 +9,7 @@ import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from . import company, images, scenarist, storage, team, tts, video, youtube
+from . import agents, company, images, pricing, scenarist, storage, team, tts, video, youtube
 from pathlib import Path
 
 from .config import load_settings
@@ -263,8 +263,38 @@ def stage_seo(pid, force=False):
     set_stage(pid, "seo", status="done", progress=100)
 
 
+def _fit_images_to_budget(pid):
+    """Before the first picture: if the frames still to draw would push the video over its
+    limit with the current image model, switch this video to the best cheaper one that fits."""
+    p = get_project(pid)
+    limit = _budget(p)
+    if not limit or p.get("image_model"):
+        return
+    sc = p["script"]
+    count = (sum(1 for s in sc["scenes"] if not s["image"])
+             + sum(1 for c in sc["characters"] if not c["image"]))
+    if not count:
+        return
+    hero = next((c for c in sc["characters"] if c.get("brand_hero")), None)
+    checks = sum(1 for s in sc["scenes"] if hero and hero["id"] in s["characters"])
+    thumb = 0 if p["thumbnail"] else pricing.per_image(agents.model_for("thumbnail"))
+    left = limit - (p.get("cost") or {}).get("total", 0) - thumb - checks * pricing.HERO_CHECK
+    current = agents.model_for("illustrator")
+    # +15%: frames where the hero came out wrong are drawn a second time.
+    model = pricing.fit_image_model(count * 1.15, left, current)
+    if model == current:
+        return
+    with edit_project(pid) as p2:
+        p2["image_model"] = model
+    fits = count * 1.15 * pricing.per_image(model) <= left
+    log(pid, f"под лимит ${limit:.2f} картинки ({count} шт.) рисует {model} "
+             f"(~${pricing.per_image(model):.3f} за штуку вместо ~${pricing.per_image(current):.3f})"
+             + ("" if fits else " — даже так лимита может не хватить"), "illustrator")
+
+
 def stage_characters(pid, force=False):
     _lock_hero(pid)
+    _fit_images_to_budget(pid)
     p = get_project(pid)
     chars = p["script"]["characters"]
     set_stage(pid, "characters", status="running", progress=0, error=None)
@@ -278,7 +308,7 @@ def stage_characters(pid, force=False):
         else:
             log(pid, f"рисую персонажа {c['name']}", "illustrator")
             images.generate(images.character_prompt(p["style"], c), path, "1:1",
-                            label=f"{c['name']}\n{c['description']}", seed=i)
+                            label=f"{c['name']}\n{c['description']}", seed=i, model=p.get("image_model"))
         with edit_project(pid) as p2:
             p2["script"]["characters"][i]["image"] = _rel(pid, path)
         set_stage(pid, "characters", progress=int((i + 1) / len(chars) * 100))
@@ -299,7 +329,7 @@ def _draw_brand_hero(pid, c, path, force=False):
         log(pid, f"рисую героя канала {c['name']} по аватару канала", "illustrator")
         images.generate(images.character_prompt(p["style"], c), path, "1:1",
                         references=[avatar] if avatar else [], label=f"{c['name']}\n{c['description']}",
-                        seed=attempt)
+                        seed=attempt, model=p.get("image_model"))
         if not avatar:
             break
         check = team.compare_character(avatar, path, c["name"], c["description"])
@@ -342,7 +372,7 @@ def _scene_image(pid, idx):
     path = project_dir(pid) / "images" / f"scene_{idx:03d}.png"
     prompt = images.scene_prompt(p["style"], scene, chars)
     images.generate(prompt, path, p["aspect"], references=refs,
-                    label=f"Scene {idx + 1}: {scene['narration']}", seed=idx)
+                    label=f"Scene {idx + 1}: {scene['narration']}", seed=idx, model=p.get("image_model"))
     with edit_project(pid) as p2:
         p2["script"]["scenes"][idx].update(image=_rel(pid, path), status="done", error=None)
 
@@ -385,6 +415,7 @@ def compare_image_models(pid, idx, models):
 
 
 def stage_images(pid, force=False):
+    _fit_images_to_budget(pid)
     p = get_project(pid)
     scenes = p["script"]["scenes"]
     todo = [s["idx"] for s in scenes if force or not s["image"]]

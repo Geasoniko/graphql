@@ -384,7 +384,7 @@ def project(pid: str):
     sc = p.get("script") or {}
     scenes = len(sc.get("scenes") or []) or p["scene_count"]
     p["estimate"] = pricing.estimate(scenes, len(sc.get("characters") or []) or 2,
-                                     planned=bool(p.get("director")))
+                                     planned=bool(p.get("director")), image_model=p.get("image_model"))
     return p
 
 
@@ -396,6 +396,8 @@ EDITABLE = {"title", "idea", "channel_id", "language", "style", "voice", "voice_
 def update_project(pid: str, body: dict = Body(...)):
     _project(pid)
     with storage.edit_project(pid) as p:
+        if "budget" in body and body["budget"] != p.get("budget"):
+            p.pop("image_model", None)  # new limit: pick the image model for it again
         for k, v in body.items():
             if k in EDITABLE:
                 p[k] = v

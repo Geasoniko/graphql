@@ -96,6 +96,7 @@ function costCard(p) {
       </table>
       <div class="muted small" style="margin-top:6px">Озвучка Edge и монтаж бесплатны. Перерисовка кадров добавляет к сумме.</div>
     </details>
+    ${p.image_model ? `<div class="muted small" style="margin-top:8px">🖌 Чтобы уложиться в лимит, кадры рисует <b>${esc(p.image_model)}</b>. Поднимите лимит — вернётся основная модель.</div>` : ""}
   </div>`;
 }
 
@@ -818,7 +819,7 @@ pages.settings = async () => {
       <h2 class="wide">Шеф-редактор</h2>
       <label>Минимальная оценка сценария<input id="s-min_script_score" type="number" min="5" max="10" value="${s.min_script_score ?? 8}"></label>
       <label>Попыток доработки<input id="s-max_rewrites" type="number" min="0" max="5" value="${s.max_rewrites ?? 3}"></label>
-      <label>Лимит расходов на одно видео, $ (0 — без лимита)<input id="s-video_budget" type="number" step="0.5" min="0" value="${s.video_budget ?? 3}"></label>
+      <label>Лимит расходов на одно видео, $ (0 — без лимита)<input id="s-video_budget" type="number" step="0.5" min="0" value="${s.video_budget ?? 1}"></label>
       <div class="wide muted small">Видео не пойдёт дальше сценария, пока редактор не поставит минимум эту оценку. Каждая доработка ≈ $0.1–0.3.</div>
       <label>FPS<input id="s-fps" type="number" value="${s.fps}"></label>
       <label class="wide">Фоновая музыка: путь к mp3 или к папке с треками (каждому видео — случайный)<input id="s-background_music" value="${esc(s.background_music)}" placeholder="C:\\Users\\User\\Music\\youtube"></label>

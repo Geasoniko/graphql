@@ -33,6 +33,15 @@ PER_IMAGE = {
     "black-forest-labs/flux-3-image-klein": 0.009,
     "sourceful/riverflow-v2-fast": 0.02,
 }
+# When a video would go over its limit, the illustrator steps down this ladder (best first)
+# to the first model whose pictures fit the money left.
+IMAGE_LADDER = [
+    "google/gemini-3.1-flash-image",
+    "google/gemini-3.1-flash-lite-image",
+    "qwen/qwen-image-2.1-turbo",
+    "black-forest-labs/flux-3-image-klein",
+]
+HERO_CHECK = 0.003        # one vision comparison of a frame with the hero reference
 IMAGE_TOKENS = 1290       # output tokens of one ~1K image on Gemini image models
 WEB_SEARCH = 0.03         # OpenRouter web plugin, ~8 results per call
 REWRITE_SHARE = 0.5       # how often the chief editor sends a script back
@@ -86,13 +95,27 @@ def _text(role, tokens_in, tokens_out):
     return cost
 
 
-def _images(role, count):
-    pin, pout, per_image = price(agents.model_for(role))
-    one = per_image or (IMAGE_TOKENS * pout + 1500 * pin)
-    return count * one
+def per_image(model):
+    pin, pout, flat = price(model)
+    return flat or (IMAGE_TOKENS * pout + 1500 * pin)
 
 
-def estimate(scene_count, characters=2, planned=True):
+def _images(role, count, model=None):
+    return count * per_image(model or agents.model_for(role))
+
+
+def fit_image_model(count, money, current):
+    """The best image model whose `count` pictures cost at most `money`
+    (the cheapest one if none fits). Never steps up from `current`."""
+    top = per_image(current)
+    ladder = [current] + sorted((m for m in IMAGE_LADDER if per_image(m) < top), key=per_image, reverse=True)
+    for m in ladder:
+        if count * per_image(m) <= money:
+            return m
+    return ladder[-1]
+
+
+def estimate(scene_count, characters=2, planned=True, image_model=None):
     """Expected $ for a whole video, total and per agent."""
     n = max(int(scene_count or 1), 1)
     script_tokens = 220 * n + 600
@@ -102,7 +125,7 @@ def estimate(scene_count, characters=2, planned=True):
         "art_director": _text("art_director", script_tokens + 1500, 160 * n + 600),
         "marketer": _text("marketer", 120 * n + 1200, 900),
         "tagger": _text("tagger", 600, 500),
-        "illustrator": _images("illustrator", n + characters),
+        "illustrator": _images("illustrator", n + characters, image_model),
         "thumbnail": _images("thumbnail", 1),
     }
     if planned:

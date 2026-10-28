@@ -6,6 +6,7 @@ called through the same endpoint with modalities=["image", "text"] and
 return the picture as a base64 data URL in message.images.
 """
 import base64
+import hashlib
 import json
 import mimetypes
 import re
@@ -14,9 +15,10 @@ import time
 import requests
 
 from . import agents, company
-from .config import is_demo, load_settings
+from .config import DATA, is_demo, load_settings
 
 API = "https://openrouter.ai/api/v1"
+CACHE_DIR = DATA / "llm_cache"
 
 
 class LLMError(RuntimeError):
@@ -74,8 +76,32 @@ def _post(payload, settings, timeout=180, role=None):
     raise LLMError(f"OpenRouter недоступен: {last}")
 
 
-def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, role=None):
-    """role: agent from agents.ROLES — picks its model and books the cost to it."""
+def _cache_file(payload):
+    key = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return CACHE_DIR / f"{key[:40]}.json"
+
+
+def _cached(payload, hours):
+    path = _cache_file(payload)
+    try:
+        hit = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return hit["content"] if time.time() - hit["at"] < hours * 3600 else None
+
+
+def _remember(payload, content):
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _cache_file(payload).write_text(json.dumps({"at": time.time(), "content": content}, ensure_ascii=False),
+                                    encoding="utf-8")
+
+
+def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, role=None, cache_hours=0,
+         valid=None):
+    """role: agent from agents.ROLES — picks its model and books the cost to it.
+    cache_hours: answer the very same request from the disk cache for that long, for free
+    (trend research, competitor analysis — clicking twice should not pay twice).
+    valid: a reply is cached only if valid(reply) is true."""
     settings = load_settings()
     if is_demo(settings):
         raise LLMError("demo")
@@ -83,6 +109,13 @@ def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, rol
         model = agents.model_for(role)
     model = model or settings["fast_text_model" if fast else "text_model"]
     payload = {"model": model, "messages": messages, "temperature": temperature}
+    if cache_hours:
+        hit = _cached(payload, cache_hours)
+        if hit is not None:
+            if role:
+                company.feed(role, "ответ из кэша — $0")
+            return hit
+    key_payload = dict(payload)
     global _web_blocked
     if role in agents.EFFORT:
         payload["reasoning"] = {"effort": agents.EFFORT[role]}
@@ -111,6 +144,8 @@ def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, rol
     content = data["choices"][0]["message"].get("content") or ""
     if isinstance(content, list):
         content = "".join(part.get("text", "") for part in content)
+    if cache_hours and content and (valid is None or valid(content)):
+        _remember(key_payload, content)
     return content
 
 
@@ -133,12 +168,21 @@ def extract_json(text):
         return json.loads(re.sub(r",\s*([}\]])", r"\1", raw))
 
 
+def _is_json(text):
+    try:
+        extract_json(text)
+        return True
+    except (LLMError, ValueError):
+        return False
+
+
 def chat_json(system, user, **kw):
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    reply = chat(messages, **kw)
+    reply = chat(messages, valid=_is_json, **kw)
     try:
         return extract_json(reply)
     except (LLMError, json.JSONDecodeError):
+        kw.pop("cache_hours", None)
         messages += [{"role": "assistant", "content": reply},
                      {"role": "user", "content": "Ответ должен быть только валидным JSON без пояснений. Повтори."}]
         return extract_json(chat(messages, **kw))

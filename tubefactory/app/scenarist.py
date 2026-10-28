@@ -127,7 +127,7 @@ JSON format:
 }}
 Give {count} ideas."""
     try:
-        return llm.chat_json(ANALYZE_SYSTEM, user, role="ref_analyst")
+        return llm.chat_json(ANALYZE_SYSTEM, user, role="ref_analyst", cache_hours=24 * 7)
     except llm.LLMError as e:
         if str(e) != "demo":
             raise
@@ -150,7 +150,7 @@ JSON format:
 {{"analysis": "кратко про нишу (рус.)", "style": "English visual style prompt",
   "ideas": [{{"title": "...", "idea": "...", "hook": "...", "why": "почему зайдёт (рус.)"}}]}}"""
     try:
-        return llm.chat_json(ANALYZE_SYSTEM, user, role="researcher")
+        return llm.chat_json(ANALYZE_SYSTEM, user, role="researcher", cache_hours=6)
     except llm.LLMError as e:
         if str(e) != "demo":
             raise
@@ -171,7 +171,7 @@ def find_niches(query, count=10):
   "example_titles": ["3 примера заголовков на английском"]
 }}]}}"""
     try:
-        return llm.chat_json(NICHE_SYSTEM, user, role="researcher")
+        return llm.chat_json(NICHE_SYSTEM, user, role="researcher", cache_hours=24)
     except llm.LLMError as e:
         if str(e) != "demo":
             raise

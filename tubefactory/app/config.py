@@ -41,7 +41,7 @@ DEFAULTS = {
     "min_script_score": 8,
     "max_rewrites": 3,
     # Stop a video when its OpenRouter spend passes this many dollars (0 = no limit).
-    "video_budget": 3.0,
+    "video_budget": 1.0,
     "background_music": "",  # path to an mp3 mixed under the voice
     "music_volume": 0.12,
     # YouTube: OAuth client from Google Cloud Console (Desktop app).
