@@ -15,6 +15,8 @@ input/output tokens):
 Any model can be swapped on the "Компания" page (stored in settings["agents"]),
 and the "Проверить модели" button checks every id against the live catalogue.
 """
+import re
+
 from .config import load_settings
 
 # kind: "llm" — text model, "image" — image model, "tool" — no model (ffmpeg, TTS, YouTube API).
@@ -76,8 +78,10 @@ ROLES = {r[0]: {"role": r[0], "department": r[1], "emoji": r[2], "name": r[3],
 
 
 def model_for(role):
-    custom = (load_settings().get("agents") or {}).get(role) or {}
-    return custom.get("model") or ROLES[role]["default_model"]
+    custom = ((load_settings().get("agents") or {}).get(role) or {}).get("model") or ""
+    if not re.match(r"^[\w.-]+/[\w.:~-]+$", custom):
+        return ROLES[role]["default_model"]  # empty, or a display name saved by mistake
+    return custom
 
 
 def candidates(model):

@@ -192,12 +192,34 @@ def company_state():
             "decisions": data["decisions"], "total_cost": round(sum(data["costs"].values()), 4)}
 
 
+MODEL_ID = re.compile(r"^[\w.-]+/[\w.:~-]+$")
+
+
+def resolve_model(text):
+    """A model id as OpenRouter expects it. Accepts a display name like "FLUX.2 Klein"
+    and finds its id in the live catalogue; otherwise explains what to type."""
+    text = (text or "").strip()
+    if not text or MODEL_ID.match(text):
+        return text
+    words = [w for w in re.split(r"[\s:()]+", text.lower()) if w]
+    try:
+        catalogue = llm.list_models(timeout=10)
+    except Exception:
+        catalogue = []
+    hits = [m for m in catalogue
+            if all(w in (m["name"] + " " + m["id"]).lower() for w in words)]
+    if len(hits) >= 1:
+        return min(hits, key=lambda m: len(m["id"]))["id"]
+    _fail(f"«{text}» — это название, а нужен ID модели вида компания/модель, "
+          "например black-forest-labs/flux.2-klein-4b. Его видно под названием на странице модели в OpenRouter.")
+
+
 @app.put("/api/agents")
 def put_agents(body: dict = Body(...)):
     current = config.load_settings().get("agents") or {}
     for role, model in body.items():
         if role in agents.ROLES:
-            model = (model or "").strip()
+            model = resolve_model(model)
             if model and model != agents.ROLES[role]["default_model"]:
                 current[role] = {"model": model}
             else:
@@ -448,7 +470,7 @@ def compare_models(pid: str, idx: int, body: dict = Body(default={})):
     p = _project(pid)
     if not p["script"] or idx >= len(p["script"]["scenes"]):
         raise HTTPException(404, "Сцена не найдена")
-    models = [m.strip() for m in body.get("models") or [] if m.strip()][:5]
+    models = [resolve_model(m) for m in body.get("models") or [] if m.strip()][:6]
     if not models:
         _fail("Выберите модели для сравнения")
     return pipeline.compare_image_models(pid, idx, models)
