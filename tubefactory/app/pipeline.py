@@ -277,7 +277,8 @@ def _fit_images_to_budget(pid):
     if not count:
         return
     hero = next((c for c in sc["characters"] if c.get("brand_hero")), None)
-    checks = sum(1 for s in sc["scenes"] if hero and hero["id"] in s["characters"])
+    checks = sum(1 for s in sc["scenes"] if hero and hero["id"] in s["characters"]) \
+        if load_settings().get("hero_check") else 0
     thumb = 0 if p["thumbnail"] else pricing.per_image(agents.model_for("thumbnail"))
     left = limit - (p.get("cost") or {}).get("total", 0) - thumb - checks * pricing.HERO_CHECK
     current = agents.model_for("illustrator")
@@ -334,7 +335,7 @@ def _draw_brand_hero(pid, c, path, force=False):
         if not avatar:
             break
         check = team.compare_character(avatar, path, c["name"], c["description"])
-        log(pid, f"сверка героя с аватаром: {check['score']}/10 {check.get('differences', '')}", "checker")
+        log(pid, f"сверка героя с аватаром: {check['score']}/10 {check.get('differences', '')}", "art_director")
         if check["score"] >= 7:
             break
     shutil.copyfile(path, master)
@@ -466,14 +467,14 @@ def _check_hero_frames(pid, only=None):
     """Look at every frame with the mascot: is it really the same hero? Redraw mismatches once."""
     p = get_project(pid)
     hero = next((c for c in p["script"]["characters"] if c.get("brand_hero") and c.get("image")), None)
-    if not hero or not load_settings().get("hero_check", True):
+    if not hero or not load_settings().get("hero_check"):
         return
     ref = project_dir(pid) / hero["image"]
     targets = [s["idx"] for s in p["script"]["scenes"]
                if hero["id"] in s["characters"] and s["image"] and (only is None or s["idx"] in only)]
     if not targets:
         return
-    log(pid, f"проверяю героя на {len(targets)} кадрах", "checker")
+    log(pid, f"проверяю героя на {len(targets)} кадрах", "art_director")
 
     def check(i):
         scene = get_project(pid)["script"]["scenes"][i]
@@ -498,7 +499,7 @@ def _check_hero_frames(pid, only=None):
     with edit_project(pid) as p2:
         p2["hero_check"] = summary
     log(pid, f"герой совпадает на {ok} из {len(results)} кадров (перерисовано {redrawn}), "
-             f"средняя оценка {summary['avg']}/10", "checker")
+             f"средняя оценка {summary['avg']}/10", "art_director")
 
 
 def stage_thumbnail(pid, force=False):

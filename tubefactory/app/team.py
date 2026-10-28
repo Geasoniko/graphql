@@ -239,7 +239,8 @@ def compare_character(reference_path, candidate_path, name, description):
         {"type": "image_url", "image_url": {"url": images.small_data_url(candidate_path)}},
     ]
     try:
-        reply = llm.chat([{"role": "user", "content": content}], role="checker", temperature=0, max_tokens=300)
+        reply = llm.chat([{"role": "user", "content": content}], role="art_director", temperature=0,
+                         max_tokens=300, effort="minimal")
         out = llm.extract_json(reply)
     except llm.LLMError as e:
         if str(e) != "demo":

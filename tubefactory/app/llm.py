@@ -102,11 +102,12 @@ def _remember(payload, content):
 
 
 def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, role=None, cache_hours=0,
-         valid=None):
+         valid=None, effort=None):
     """role: agent from agents.ROLES — picks its model and books the cost to it.
     cache_hours: answer the very same request from the disk cache for that long, for free
     (trend research, competitor analysis — clicking twice should not pay twice).
-    valid: a reply is cached only if valid(reply) is true."""
+    valid: a reply is cached only if valid(reply) is true.
+    effort: reasoning effort for this call instead of the role's usual one."""
     settings = load_settings()
     if is_demo(settings):
         raise LLMError("demo")
@@ -122,8 +123,8 @@ def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, rol
             return hit
     key_payload = dict(payload)
     global _web_blocked
-    if role in agents.EFFORT:
-        payload["reasoning"] = {"effort": agents.EFFORT[role]}
+    if effort or role in agents.EFFORT:
+        payload["reasoning"] = {"effort": effort or agents.EFFORT[role]}
     if role and agents.ROLES.get(role, {}).get("web") and not _web_blocked:
         payload["plugins"] = [{"id": "web", "max_results": 8}]
     if max_tokens:

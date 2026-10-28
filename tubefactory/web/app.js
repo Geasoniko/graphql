@@ -849,7 +849,7 @@ pages.settings = async () => {
       <h2 class="wide">Монтаж</h2>
       <label class="check"><input type="checkbox" id="s-subtitles" ${s.subtitles ? "checked" : ""}> Субтитры в видео</label>
       <label class="check"><input type="checkbox" id="s-ken_burns" ${s.ken_burns ? "checked" : ""}> Движение камеры (Ken Burns)</label>
-      <label class="check"><input type="checkbox" id="s-hero_check" ${s.hero_check !== false ? "checked" : ""}> 🧬 Проверять героя канала на каждом кадре</label>
+      <label class="check"><input type="checkbox" id="s-hero_check" ${s.hero_check ? "checked" : ""}> 🧬 Проверять героя канала на каждом кадре <span class="muted">(~$0.0015 за кадр, выключено — бесплатно)</span></label>
       <h2 class="wide">Шеф-редактор</h2>
       <label>Минимальная оценка сценария<input id="s-min_script_score" type="number" min="5" max="10" value="${s.min_script_score ?? 8}"></label>
       <label>Попыток доработки<input id="s-max_rewrites" type="number" min="0" max="5" value="${s.max_rewrites ?? 3}"></label>

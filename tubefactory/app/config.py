@@ -36,7 +36,7 @@ DEFAULTS = {
     "fps": 30,
     "subtitles": True,
     "ken_burns": True,
-    "hero_check": True,  # a vision model checks the mascot on every frame (~$0.001 per frame)
+    "hero_check": False,  # a vision model checks the mascot on every frame (~$0.0015 per frame)
     # Chief editor: the script must score at least this to go on; rewrites allowed to get there.
     "min_script_score": 8,
     "max_rewrites": 3,
