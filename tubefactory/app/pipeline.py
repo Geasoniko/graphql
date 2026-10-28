@@ -621,7 +621,21 @@ STAGE_FUNCS = {
 }
 
 
+def clear_errors(pid):
+    """Forget old error messages: frames that have a picture are fine, failed stages wait
+    to be continued. A problem that is still there shows up again on the next run."""
+    with edit_project(pid) as p:
+        for s in (p.get("script") or {}).get("scenes", []):
+            if s.get("status") == "error" and s.get("image"):
+                s.update(status="done", error=None)
+        for k, st in p["stages"].items():
+            if st["status"] == "error":
+                st.update(status="done" if _finished(p, k) else "idle",
+                          error=None)
+
+
 def run(pid, stage="all", force=False):
+    clear_errors(pid)
     _over_budget.discard(pid)
     p = get_project(pid)
     if _budget(p) and (p.get("cost") or {}).get("total", 0) > _budget(p) and stage == "all":

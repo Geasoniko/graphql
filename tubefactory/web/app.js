@@ -319,6 +319,9 @@ function renderProject(p, keepScroll = false) {
       <div class="stepper">${Object.entries(p.stages).map(([k, st]) => stepHTML(p, k, st)).join("")}</div>
       ${Object.entries(p.stages).filter(([, st]) => st.status === "error").map(([k, st]) =>
         `<div class="alert" style="margin-top:10px">⚠️ <b>${STAGE_NAMES[k]}</b>: ${esc(st.error || "")}<div class="small muted" style="margin-top:4px">Нажмите «▶ Продолжить генерацию» — софт продолжит с места ошибки.</div></div>`).join("")}
+      ${!p.busy && (Object.values(p.stages).some((st) => st.status === "error") || (sc?.scenes || []).some((s) => s.error))
+        ? `<div class="row" style="margin-top:10px"><button class="btn sm" id="p-clear-errors">🧹 Убрать старые ошибки</button>
+           <span class="muted small">Готовые кадры останутся. Если проблема ещё есть, ошибка появится снова при запуске.</span></div>` : ""}
     </div>
 
     ${costCard(p)}
@@ -435,6 +438,10 @@ function bindProject(p) {
     toast("Добавлено в очередь"); await reload();
   });
   $("#p-run").onclick = () => run("all", false);
+  $("#p-clear-errors") && ($("#p-clear-errors").onclick = () => guard(async () => {
+    await api(`/api/projects/${pid}/clear-errors`, { body: {} });
+    toast("Ошибки убраны"); await reload();
+  }));
   $("#p-stop") && ($("#p-stop").onclick = () => guard(async () => { await api(`/api/projects/${pid}/stop`, { body: {} }); toast("Останавливаю…"); }));
   $("#p-del").onclick = () => confirm("Удалить проект со всеми файлами?") && guard(async () => {
     await api(`/api/projects/${pid}`, { method: "DELETE" }); location.hash = "#/projects";

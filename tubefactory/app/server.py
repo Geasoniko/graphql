@@ -431,6 +431,15 @@ def delete_project(pid: str):
     return {"ok": True}
 
 
+@app.post("/api/projects/{pid}/clear-errors")
+def clear_errors(pid: str):
+    _project(pid)
+    if jobs.is_busy(pid):
+        _fail("Проект сейчас в работе — ошибки уберутся сами при следующем запуске")
+    pipeline.clear_errors(pid)
+    return {"ok": True}
+
+
 @app.post("/api/projects/{pid}/run")
 def run_project(pid: str, body: dict = Body(default={})):
     _project(pid)
