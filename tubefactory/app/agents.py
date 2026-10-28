@@ -36,6 +36,8 @@ STAFF = [
      "Создаёт стиль-гайд, персонажей, пишет промпты кадров и выбирает движение камеры для анимации."),
     ("stylist", "Продакшн", "🖋", "Стилист канала", "anthropic/claude-sonnet-5.5", "llm",
      "Создаёт фирменный стиль канала: стиль картинок, героя, палитру, правила превью, шапку и аватар."),
+    ("checker", "Продакшн", "🔍", "Контролёр героя", "google/gemini-3.8-flash", "llm",
+     "Сверяет героя на каждом кадре с эталоном: он или нет. Отвечает одной оценкой, без рассуждений — копейки за кадр."),
     ("illustrator", "Продакшн", "🖌", "Художник", "google/gemini-3.1-flash-image", "image",
      "Рисует персонажей и кадры, сохраняя внешность героя во всех сценах."),
     ("voice", "Продакшн", "🎙", "Диктор", "", "tool",
@@ -63,7 +65,7 @@ WEB_ROLES = {"researcher", "tagger"}
 EFFORT = {
     "director": "medium", "writer": "medium", "editor": "low", "art_director": "low",
     "ref_analyst": "low", "researcher": "low", "analyst": "low", "marketer": "low", "tagger": "minimal",
-    "stylist": "medium",
+    "stylist": "medium", "checker": "minimal",
 }
 
 # Backup ids sent as OpenRouter's `models` fallback list: if the main id is

@@ -232,16 +232,19 @@ def compare_character(reference_path, candidate_path, name, description):
             f"Image 2 is a new picture. Is {name} in image 2 the same character as in image 1 "
             "(same face shape, hair, clothes, colors, proportions and drawing style)? Ignore pose, "
             "angle, background and other characters. If {name} is not in image 2 at all, score 0.\n"
-            'Reply with JSON only: {"score": 0-10, "same": true/false, "differences": "кратко на русском"}')},
+            # A short verdict, no reasoning: the answer is a handful of tokens, the cost is the two images.
+            'Reply with JSON only, no explanation: {"score": 0-10, "differences": "до 8 слов на русском, '
+            'пусто если похож"}')},
         {"type": "image_url", "image_url": {"url": images.small_data_url(reference_path)}},
         {"type": "image_url", "image_url": {"url": images.small_data_url(candidate_path)}},
     ]
     try:
-        reply = llm.chat([{"role": "user", "content": content}], role="art_director", temperature=0)
+        reply = llm.chat([{"role": "user", "content": content}], role="checker", temperature=0, max_tokens=300)
         out = llm.extract_json(reply)
     except llm.LLMError as e:
         if str(e) != "demo":
             raise
         return {"score": 10, "same": True, "differences": "демо"}
     out["score"] = int(out.get("score") or 0)
+    out["same"] = out["score"] >= 6
     return out

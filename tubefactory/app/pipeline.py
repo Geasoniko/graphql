@@ -334,7 +334,7 @@ def _draw_brand_hero(pid, c, path, force=False):
         if not avatar:
             break
         check = team.compare_character(avatar, path, c["name"], c["description"])
-        log(pid, f"сверка героя с аватаром: {check['score']}/10 {check.get('differences', '')}", "art_director")
+        log(pid, f"сверка героя с аватаром: {check['score']}/10 {check.get('differences', '')}", "checker")
         if check["score"] >= 7:
             break
     shutil.copyfile(path, master)
@@ -473,7 +473,7 @@ def _check_hero_frames(pid, only=None):
                if hero["id"] in s["characters"] and s["image"] and (only is None or s["idx"] in only)]
     if not targets:
         return
-    log(pid, f"проверяю героя на {len(targets)} кадрах", "art_director")
+    log(pid, f"проверяю героя на {len(targets)} кадрах", "checker")
 
     def check(i):
         scene = get_project(pid)["script"]["scenes"][i]
@@ -498,7 +498,7 @@ def _check_hero_frames(pid, only=None):
     with edit_project(pid) as p2:
         p2["hero_check"] = summary
     log(pid, f"герой совпадает на {ok} из {len(results)} кадров (перерисовано {redrawn}), "
-             f"средняя оценка {summary['avg']}/10", "art_director")
+             f"средняя оценка {summary['avg']}/10", "checker")
 
 
 def stage_thumbnail(pid, force=False):

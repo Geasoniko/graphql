@@ -41,7 +41,7 @@ IMAGE_LADDER = [
     "qwen/qwen-image-2.1-turbo",
     "black-forest-labs/flux-3-image-klein",
 ]
-HERO_CHECK = 0.003        # one vision comparison of a frame with the hero reference
+HERO_CHECK = 0.0015       # one vision comparison of a frame with the hero reference (no reasoning)
 IMAGE_TOKENS = 1290       # output tokens of one ~1K image on Gemini image models
 WEB_SEARCH = 0.03         # OpenRouter web plugin, ~8 results per call
 REWRITE_SHARE = 0.5       # how often the chief editor sends a script back

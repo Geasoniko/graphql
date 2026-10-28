@@ -135,7 +135,9 @@ def chat(messages, model=None, temperature=0.8, max_tokens=None, fast=False, rol
             break
         except LLMError as e:
             text = str(e).lower()
-            if "reasoning" in payload and "reasoning" in text:
+            if payload.get("reasoning", {}).get("effort") == "minimal" and "reasoning" in text:
+                payload["reasoning"] = {"effort": "low"}  # no "minimal" on this model: the next cheapest
+            elif "reasoning" in payload and "reasoning" in text:
                 payload.pop("reasoning")  # this model rejects the effort setting
             elif "plugins" in payload and ("plugin" in text or "'web'" in text or "server tool" in text):
                 _web_blocked = True
