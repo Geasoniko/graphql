@@ -26,6 +26,7 @@ DEFAULT_PRICE = (2e-6, 10e-6)
 # Image models billed per picture (≈1920x1080 output), from OpenRouter's model pages.
 PER_IMAGE = {
     "qwen/qwen-image-3": 0.03,
+    "qwen/qwen-image-2.1-turbo": 0.0184,
     "bytedance-seed/seedream-5-0-flash": 0.018,
     "bytedance-seed/seedream-4.5": 0.04,
     "black-forest-labs/flux.2-klein-4b": 0.015,
