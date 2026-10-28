@@ -58,6 +58,7 @@ def create_project(**fields):
         "language": fields.get("language", "English"),
         "style": fields.get("style", ""),
         "voice": fields.get("voice", "en-US-AndrewNeural"),
+        "voice_provider": fields.get("voice_provider") or "",
         "scene_count": int(fields.get("scene_count") or 20),
         "pacing": fields.get("pacing", "calm"),
         "aspect": fields.get("aspect", "16:9"),
@@ -154,6 +155,7 @@ CHANNEL_DEFAULTS = {
     "niche": "",
     "language": "English",
     "voice": "en-US-AndrewNeural",
+    "voice_provider": "",  # empty: the service chosen in Settings
     "style": "",
     "scene_count": 20,
     "pacing": "calm",

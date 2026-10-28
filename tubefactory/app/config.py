@@ -36,10 +36,12 @@ DEFAULTS = {
     "fps": 30,
     "subtitles": True,
     "ken_burns": True,
-    "hero_check": True,
+    "hero_check": True,  # a vision model checks the mascot on every frame (~$0.001 per frame)
     # Chief editor: the script must score at least this to go on; rewrites allowed to get there.
     "min_script_score": 8,
-    "max_rewrites": 3,  # a vision model checks the mascot on every frame (~$0.001 per frame)
+    "max_rewrites": 3,
+    # Stop a video when its OpenRouter spend passes this many dollars (0 = no limit).
+    "video_budget": 3.0,
     "background_music": "",  # path to an mp3 mixed under the voice
     "music_volume": 0.12,
     # YouTube: OAuth client from Google Cloud Console (Desktop app).

@@ -1,4 +1,5 @@
 """HTTP API + static web UI."""
+import re
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -65,11 +66,39 @@ def models():
 @app.get("/api/voices")
 def voices():
     settings = config.load_settings()
-    eleven = tts.elevenlabs_voices(settings) if settings.get("tts_provider") == "elevenlabs" else tts.ELEVEN_DEFAULT
+    eleven = tts.elevenlabs_voices(settings) if settings.get("elevenlabs_api_key") else tts.ELEVEN_DEFAULT
     return {"edge": [{"id": v, "name": n} for v, n in tts.EDGE_VOICES],
             "kokoro": [{"id": v, "name": n} for v, n in tts.KOKORO_VOICES],
             "elevenlabs": [{"id": v, "name": n} for v, n in eleven],
-            "openai": [{"id": v, "name": v} for v in tts.OPENAI_VOICES]}
+            "openai": [{"id": v, "name": v} for v in tts.OPENAI_VOICES],
+            "available": tts.available_providers(settings), "default": settings.get("tts_provider")}
+
+
+@app.post("/api/voices/sample")
+def voice_sample(body: dict = Body(...)):
+    """A short sample of one voice. Each sample is made once and kept, so listening again is free."""
+    provider, voice = body.get("provider") or "edge", body.get("voice") or ""
+    d = config.DATA / "voice_samples"
+    d.mkdir(exist_ok=True)
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{provider}__{voice}") + ".mp3"
+    path = d / name
+    if not path.exists():
+        text = ("Forty thousand years ago, there were no maps, no roads and no signs. "
+                "So how did our ancestors find their way home?")
+        try:
+            tts.synthesize(text, voice, path, provider)
+        except Exception as e:
+            path.unlink(missing_ok=True)
+            _fail(f"Не получилось озвучить: {e}")
+    return {"url": f"/voice-sample/{name}"}
+
+
+@app.get("/voice-sample/{name}")
+def voice_sample_file(name: str):
+    f = (config.DATA / "voice_samples" / name).resolve()
+    if f.parent != (config.DATA / "voice_samples").resolve() or not f.is_file():
+        raise HTTPException(404)
+    return FileResponse(f, media_type="audio/mpeg")
 
 
 @app.post("/api/voices/preview")
@@ -337,7 +366,7 @@ def project(pid: str):
     return p
 
 
-EDITABLE = {"title", "idea", "channel_id", "language", "style", "voice", "scene_count",
+EDITABLE = {"title", "idea", "channel_id", "language", "style", "voice", "voice_provider", "budget", "scene_count",
             "pacing", "aspect", "auto_upload", "privacy", "publish_at"}
 
 

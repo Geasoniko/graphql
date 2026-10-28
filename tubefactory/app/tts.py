@@ -240,9 +240,10 @@ def _demo(text, path):
                     "-c:a", "libmp3lame", "-q:a", "6", str(path)], check=True)
 
 
-def synthesize(text, voice, path):
+def synthesize(text, voice, path, provider=None):
+    """provider: the channel's voice service; empty means the one chosen in Settings."""
     settings = load_settings()
-    provider = settings["tts_provider"]
+    provider = provider or settings["tts_provider"]
     text = re.sub(r"\s+", " ", text).strip()
     words = None
     if is_demo(settings) and provider == "edge" and settings.get("demo_mode"):
@@ -273,3 +274,18 @@ def synthesize(text, voice, path):
     if not words:
         words = estimate_words(text, total)
     return words, total
+
+
+def available_providers(settings):
+    """Voice services usable right now, for the voice gallery."""
+    from . import system
+    out = ["edge"]
+    if system.installed("kokoro"):
+        out.append("kokoro")
+    if settings.get("elevenlabs_api_key"):
+        out.append("elevenlabs")
+    if settings.get("openrouter_api_key"):
+        out.append("openrouter")
+    if settings.get("openai_api_key"):
+        out.append("openai")
+    return out

@@ -38,6 +38,9 @@ SCRIPT_FORMAT = """JSON format:
 PACING = {
     "calm": "Each scene narration is 2-4 sentences (about 8-15 seconds of speech).",
     "dynamic": "Each scene narration is ONE short sentence or phrase (about 2-5 seconds). Many fast cuts.",
+    "economy": ("Each scene narration is 4-6 sentences (about 18-24 seconds). Every frame is shown twice: "
+                "a wide shot, then the camera moves in close on one part of it. So each image prompt must "
+                "describe a rich composition: one clear main subject plus a secondary detail worth a close-up."),
 }
 
 

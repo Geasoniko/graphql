@@ -31,15 +31,31 @@ def _motion_filter(kind, frames, w, h, fps):
             f":s={w}x{h}:fps={fps},setsar=1,format=yuv420p")
 
 
-def render_clip(image, audio, out, seconds, idx, aspect="16:9", fps=30, ken_burns=True, motion=None):
+def _closeup_filter(frames, w, h, fps, side):
+    """Second shot of the economy mode: a slow push-in on the left/right/centre third."""
+    n = max(frames - 1, 1)
+    fx = {0: "0.15", 1: "0.85", 2: "0.5"}[side]
+    return (f"scale={w * 2}:{h * 2},zoompan=z='1.45+0.12*on/{n}':x='(iw-iw/zoom)*{fx}':"
+            f"y='(ih-ih/zoom)*0.45':d={frames}:s={w}x{h}:fps={fps},setsar=1,format=yuv420p")
+
+
+def render_clip(image, audio, out, seconds, idx, aspect="16:9", fps=30, ken_burns=True, motion=None,
+                shots=1):
     """motion: camera move chosen by the art director (zoom_in, zoom_out, pan_left,
-    pan_right, static); without one the moves rotate scene by scene."""
+    pan_right, static); without one the moves rotate scene by scene.
+    shots=2 (economy mode): the still plays as a wide shot, then a close-up of one part,
+    so the picture changes as often as with two images while paying for one."""
     w, h = SIZES.get(aspect, SIZES["16:9"])
     total = seconds + PAD
     frames = int(round(total * fps))
     if motion not in MOTIONS and motion != "static":
         motion = MOTIONS[idx % len(MOTIONS)]
-    if ken_burns and motion != "static":
+    if shots == 2 and ken_burns and total >= 8:
+        first = frames // 2
+        vf = (f"split=2[s1][s2];[s1]{_motion_filter('zoom_in' if motion == 'static' else motion, first, w, h, fps)}[v1];"
+              f"[s2]{_closeup_filter(frames - first, w, h, fps, idx % 3)}[v2];[v1][v2]concat=n=2:v=1:a=0")
+        vin = ["-i", str(image)]
+    elif ken_burns and motion != "static":
         vf = _motion_filter(motion, frames, w, h, fps)
         vin = ["-i", str(image)]
     else:

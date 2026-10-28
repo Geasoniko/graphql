@@ -21,6 +21,7 @@ class Cancelled(Exception):
 
 
 _cancel = set()
+_over_budget = set()
 
 
 def cancel(pid):
@@ -31,6 +32,28 @@ def _check(pid):
     if pid in _cancel:
         _cancel.discard(pid)
         raise Cancelled()
+    if pid in _over_budget:
+        _over_budget.discard(pid)
+        p = get_project(pid)
+        raise RuntimeError(f"Лимит расходов на видео: потрачено ${(p.get('cost') or {}).get('total', 0):.2f} "
+                           f"при лимите ${_budget(p):.2f}. Поднимите лимит в «Настройки проекта» "
+                           "(0 — без лимита) и нажмите «Продолжить генерацию».")
+
+
+def _budget(p):
+    b = p.get("budget")
+    return float(load_settings().get("video_budget") or 0) if b in (None, "") else float(b)
+
+
+def _book(pid):
+    """Cost sink for a project: books the spend and trips the budget stop."""
+    def sink(role, cost):
+        storage.add_cost(pid, role, cost)
+        p = get_project(pid)
+        limit = _budget(p)
+        if limit and (p.get("cost") or {}).get("total", 0) > limit:
+            _over_budget.add(pid)
+    return sink
 
 
 def _brand(p):
@@ -290,7 +313,7 @@ def _scene_audio(pid, idx, voice):
     p = get_project(pid)
     scene = p["script"]["scenes"][idx]
     path = project_dir(pid) / "audio" / f"scene_{idx:03d}.mp3"
-    words, dur = tts.synthesize(scene["narration"], voice, path)
+    words, dur = tts.synthesize(scene["narration"], voice, path, p.get("voice_provider"))
     with edit_project(pid) as p2:
         s = p2["script"]["scenes"][idx]
         s.update(audio=_rel(pid, path), words=words, duration=dur)
@@ -351,7 +374,7 @@ def stage_images(pid, force=False):
                 log(pid, f"Ошибка кадра {i + 1}: {e}")
             done = sum(1 for s in get_project(pid)["script"]["scenes"] if s["image"])
             set_stage(pid, "images", progress=int(done / len(scenes) * 100))
-            if pid in _cancel:
+            if pid in _cancel or pid in _over_budget:
                 for other in futures:
                     other.cancel()
     _check(pid)
@@ -439,7 +462,8 @@ def stage_render(pid, force=False):
         _check(pid)
         clip = d / "clips" / f"clip_{i:03d}.mp4"
         length = video.render_clip(d / s["image"], d / s["audio"], clip, s["duration"], i,
-                                   p["aspect"], settings["fps"], settings["ken_burns"], s.get("camera"))
+                                   p["aspect"], settings["fps"], settings["ken_burns"], s.get("camera"),
+                                   shots=2 if p.get("pacing") == "economy" else 1)
         clips.append(clip)
         timeline.append((offset, s["words"]))
         offset += length
@@ -520,7 +544,11 @@ STAGE_FUNCS = {
 
 
 def run(pid, stage="all", force=False):
-    with company.booking(lambda role, cost: storage.add_cost(pid, role, cost)):
+    _over_budget.discard(pid)
+    p = get_project(pid)
+    if _budget(p) and (p.get("cost") or {}).get("total", 0) > _budget(p) and stage == "all":
+        _over_budget.add(pid)  # already over the limit: stop before spending more
+    with company.booking(_book(pid)):
         _run(pid, stage, force)
 
 
@@ -560,7 +588,7 @@ def create_from_idea(idea, channel_id=None, reference="", **overrides):
     fields = {"idea": idea, "reference": reference, "channel_id": channel_id}
     if channel_id:
         ch = storage.get_channel(channel_id)
-        for key in ("language", "voice", "style", "scene_count", "pacing", "aspect", "privacy"):
+        for key in ("language", "voice", "voice_provider", "style", "scene_count", "pacing", "aspect", "privacy"):
             fields[key] = ch.get(key)
         palette = (ch.get("brand") or {}).get("palette") or []
         if palette and fields.get("style"):

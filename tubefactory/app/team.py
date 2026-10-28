@@ -15,11 +15,10 @@ def _ask(role, system, user, demo, **kw):
 
 
 def _script_text(script, limit=40000):
-    slim = {k: script.get(k) for k in ("title", "characters", "style")}
+    slim = {k: script.get(k) for k in ("title", "style")}
+    slim["characters"] = [{k: v for k, v in c.items() if k != "image"} for c in script.get("characters") or []]
     slim["scenes"] = [{"n": s["idx"] + 1, "narration": s["narration"], "image_prompt": s["image_prompt"],
                        "characters": s["characters"]} for s in script["scenes"]]
-    for c in slim["characters"] or []:
-        c.pop("image", None)
     return json.dumps(slim, ensure_ascii=False)[:limit]
 
 

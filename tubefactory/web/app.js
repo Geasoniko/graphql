@@ -56,11 +56,17 @@ function options(list, value) {
   }).join("");
 }
 
-function voiceOptions(value) {
-  const provider = cache.settings.tts_provider;
-  const list = provider === "openai" || provider === "openrouter" ? cache.voices.openai
+const PROVIDER_NAMES = { edge: "Edge — бесплатно", kokoro: "Kokoro — бесплатно, на ноутбуке", elevenlabs: "ElevenLabs",
+  openrouter: "OpenRouter TTS", openai: "OpenAI TTS" };
+
+function voiceList(provider) {
+  return provider === "openai" || provider === "openrouter" ? cache.voices.openai
     : provider === "kokoro" ? cache.voices.kokoro
     : provider === "elevenlabs" ? cache.voices.elevenlabs : cache.voices.edge;
+}
+
+function voiceOptions(value, provider) {
+  const list = voiceList(provider || cache.settings.tts_provider);
   // A voice from another service is not offered: the first voice of this service is preselected.
   const known = list.some((v) => v.id === value);
   return options(list, known ? value : list[0]?.id);
@@ -314,11 +320,12 @@ function renderProject(p, keepScroll = false) {
         <label class="wide">Идея<textarea id="f-idea">${esc(p.idea)}</textarea></label>
         <label>Канал<select id="f-channel_id">${chOptions}</select></label>
         <label>Язык озвучки<select id="f-language">${options(LANGUAGES, p.language)}</select></label>
-        <label>Голос<select id="f-voice">${voiceOptions(p.voice)}</select></label>
+        <label>Голос<select id="f-voice">${voiceOptions(p.voice, p.voice_provider)}</select></label>
         <label>Кол-во сцен <span id="f-est" class="badge">~${money(p.estimate?.total)}</span><input id="f-scene_count" type="number" min="1" max="200" value="${p.scene_count}"></label>
-        <label>Ритм кадров<select id="f-pacing">${options([["calm", "Спокойный: кадр на 2-4 фразы"], ["dynamic", "Динамичный: кадр на каждую фразу"]], p.pacing)}</select></label>
+        <label>Ритм кадров<select id="f-pacing">${options([["calm", "Спокойный: кадр на 2-4 фразы"], ["dynamic", "Динамичный: кадр на каждую фразу"], ["economy", "Эконом: 1 картинка на 4–6 фраз, 2 ракурса — в 2 раза дешевле"]], p.pacing)}</select></label>
         <label>Формат<select id="f-aspect">${options([["16:9", "16:9 — обычное видео"], ["9:16", "9:16 — Shorts"]], p.aspect)}</select></label>
         <label>Доступ на YouTube<select id="f-privacy">${options([["private", "Приватное"], ["unlisted", "По ссылке"], ["public", "Публичное"]], p.privacy)}</select></label>
+        <label>Лимит расходов на это видео, $ <span class="muted">(пусто — как в Настройках, 0 — без лимита)</span><input id="f-budget" type="number" step="0.5" min="0" value="${p.budget ?? ""}" placeholder="${cache.settings.video_budget}"></label>
         <label>Отложенная публикация (UTC)<input id="f-publish_at" placeholder="2026-10-26T15:00:00Z" value="${esc(p.publish_at || "")}"></label>
         <label class="wide">Стиль картинок (English)<textarea id="f-style">${esc(p.style)}</textarea></label>
         <label class="check"><input type="checkbox" id="f-auto_upload" ${p.auto_upload ? "checked" : ""}> Загрузить на YouTube после сборки</label>
@@ -432,6 +439,7 @@ function bindProject(p) {
   $("#p-save").onclick = (e) => guard(async () => {
     const body = {};
     for (const k of ["idea", "channel_id", "language", "voice", "pacing", "aspect", "privacy", "publish_at", "style"]) body[k] = $(`#f-${k}`).value || null;
+    body.budget = $("#f-budget").value === "" ? null : +$("#f-budget").value;
     body.idea = body.idea || "";
     body.style = body.style || "";
     body.scene_count = +$("#f-scene_count").value;
@@ -632,9 +640,11 @@ function channelForm(c) {
       <label>Название<input data-k="name" value="${esc(c.name)}"></label>
       <label class="wide">Ниша (для автопилота и идей)<input data-k="niche" value="${esc(c.niche)}" placeholder="например: how ancient people survived, animated explainer"></label>
       <label>Язык<select data-k="language">${options(LANGUAGES, c.language)}</select></label>
-      <label>Голос <a href="#" class="small" data-preview>▶ послушать</a><select data-k="voice">${voiceOptions(c.voice)}</select></label>
+      <label>Голос <span class="muted">(${esc(PROVIDER_NAMES[c.voice_provider || cache.settings.tts_provider] || "")})</span>
+        <a href="#" class="small" data-gallery>🎙 выбрать на слух</a>
+        <select data-k="voice">${voiceOptions(c.voice, c.voice_provider)}</select><input type="hidden" data-k="voice_provider" value="${esc(c.voice_provider || "")}"></label>
       <label>Сцен в видео<input data-k="scene_count" type="number" value="${c.scene_count}"></label>
-      <label>Ритм<select data-k="pacing">${options([["calm", "Спокойный"], ["dynamic", "Динамичный"]], c.pacing)}</select></label>
+      <label>Ритм<select data-k="pacing">${options([["economy", "💰 Эконом: 2 ракурса из 1 картинки"], ["calm", "Спокойный"], ["dynamic", "Динамичный"]], c.pacing)}</select></label>
       <label>Формат<select data-k="aspect">${options([["16:9", "16:9"], ["9:16", "9:16 Shorts"]], c.aspect)}</select></label>
       <label>Доступ<select data-k="privacy">${options([["private", "Приватное"], ["unlisted", "По ссылке"], ["public", "Публичное"]], c.privacy)}</select></label>
       <label class="wide">Стиль картинок (English)<textarea data-k="style" placeholder="simple flat 2D cartoon, thick outlines, muted warm colors">${esc(c.style)}</textarea></label>
@@ -706,17 +716,7 @@ function bindChannels() {
       toast("Канал сохранён"); await reroute();
     }, e.target);
     $("[data-del]", card).onclick = () => confirm("Удалить канал?") && guard(async () => { await api(`/api/channels/${id}`, { method: "DELETE" }); await reroute(); });
-    $("[data-preview]", card).onclick = (e) => {
-      e.preventDefault();
-      const link = e.target;
-      guard(async () => {
-        link.textContent = "⏳ озвучиваю… (Kokoro первый раз ~1 мин)";
-        try {
-          const r = await api("/api/voices/preview", { body: { voice: $("[data-k=voice]", card).value } });
-          new Audio(r.url).play();
-        } finally { link.textContent = "▶ послушать"; }
-      });
-    };
+    $("[data-gallery]", card).onclick = (e) => { e.preventDefault(); openVoiceGallery(id); };
     $("[data-hero-reset]", card) && ($("[data-hero-reset]", card).onclick = (e) => confirm("Нарисовать эталон героя заново со следующего видео?") && guard(async () => {
       await api(`/api/channels/${id}/hero/reset`, { body: {} });
       toast("Эталон сброшен — следующее видео нарисует героя заново по аватару"); await reroute();
@@ -816,6 +816,7 @@ pages.settings = async () => {
       <h2 class="wide">Шеф-редактор</h2>
       <label>Минимальная оценка сценария<input id="s-min_script_score" type="number" min="5" max="10" value="${s.min_script_score ?? 8}"></label>
       <label>Попыток доработки<input id="s-max_rewrites" type="number" min="0" max="5" value="${s.max_rewrites ?? 3}"></label>
+      <label>Лимит расходов на одно видео, $ (0 — без лимита)<input id="s-video_budget" type="number" step="0.5" min="0" value="${s.video_budget ?? 3}"></label>
       <div class="wide muted small">Видео не пойдёт дальше сценария, пока редактор не поставит минимум эту оценку. Каждая доработка ≈ $0.1–0.3.</div>
       <label>FPS<input id="s-fps" type="number" value="${s.fps}"></label>
       <label class="wide">Фоновая музыка: путь к mp3 или к папке с треками (каждому видео — случайный)<input id="s-background_music" value="${esc(s.background_music)}" placeholder="C:\\Users\\User\\Music\\youtube"></label>
@@ -909,8 +910,53 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { closeModal(); $$(".lightbox").forEach((x) => x.remove()); }
 });
 
+// ---------------- voice gallery ----------------
+
+const playing = { audio: null };
+
+function openVoiceGallery(channelId) {
+  const ch = cache.channels.find((c) => c.id === channelId);
+  const providers = cache.voices.available || ["edge"];
+  let tab = providers.includes(ch.voice_provider) ? ch.voice_provider
+    : providers.includes(cache.settings.tts_provider) ? cache.settings.tts_provider : providers[0];
+  const draw = () => {
+    const current = (ch.voice_provider || cache.settings.tts_provider) === tab ? ch.voice : null;
+    $("#modal-root").innerHTML = `<div class="modal-back" id="vg-back"><div class="modal" style="width:min(720px,100%)">
+      <h2>🎙 Голос для «${esc(ch.name)}»</h2>
+      <div class="tabs" style="margin-bottom:12px">${providers.map((p) => `<button class="btn sm ${p === tab ? "active" : ""}" data-vtab="${p}">${esc(PROVIDER_NAMES[p] || p)}</button>`).join("")}</div>
+      <div class="muted small" style="margin-bottom:8px">▶ — послушать образец (озвучивается один раз, повторно бесплатно). Kokoro в первый раз загружается ~1 мин.</div>
+      <div class="col" style="max-height:55vh;overflow:auto">${voiceList(tab).map((v) => `
+        <div class="row card" style="padding:8px 12px;background:${v.id === current ? "rgba(51,214,159,.15)" : "rgba(5,15,40,.35)"}">
+          <button class="btn sm" data-play="${esc(v.id)}">▶</button>
+          <span class="grow">${esc(v.name)}</span>
+          ${v.id === current ? '<span class="badge ok">выбран</span>' : `<button class="btn sm primary" data-pick="${esc(v.id)}">Выбрать</button>`}
+        </div>`).join("")}</div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" id="vg-close">Готово</button></div>
+    </div></div>`;
+    $("#vg-close").onclick = closeModal;
+    $("#vg-back").onclick = (e) => { if (e.target.id === "vg-back") closeModal(); };
+    $$("[data-vtab]").forEach((b) => b.onclick = () => { tab = b.dataset.vtab; draw(); });
+    $$("[data-play]").forEach((b) => b.onclick = () => guard(async () => {
+      b.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div>';
+      try {
+        const r = await api("/api/voices/sample", { body: { provider: tab, voice: b.dataset.play } });
+        if (playing.audio) playing.audio.pause();
+        playing.audio = new Audio(r.url);
+        playing.audio.play();
+      } finally { b.textContent = "▶"; }
+    }));
+    $$("[data-pick]").forEach((b) => b.onclick = () => guard(async () => {
+      await api("/api/channels", { body: { id: channelId, voice: b.dataset.pick, voice_provider: tab } });
+      Object.assign(ch, { voice: b.dataset.pick, voice_provider: tab });
+      toast("Голос канала выбран — новые видео будут с ним");
+      draw();
+    }));
+  };
+  draw();
+}
+
 // Average narration per scene: calm = 2-4 sentences, dynamic = one phrase.
-const SECONDS_PER_SCENE = { calm: 11, dynamic: 4 };
+const SECONDS_PER_SCENE = { calm: 11, dynamic: 4, economy: 20 };
 
 function sceneMinutes(ch) {
   const m = Math.round((ch.scene_count || 20) * SECONDS_PER_SCENE[ch.pacing || "calm"] / 60);
