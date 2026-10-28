@@ -36,8 +36,9 @@ def style_channel(channel_id, wish="", preset_id=None):
     raw.unlink(missing_ok=True)
 
     raw = d / "avatar_raw.png"
-    images.generate(f"YouTube channel avatar, square, centered face, bold and readable at small size, no text. "
-                    f"Style: {style}. Character: {hero.get('description', '')}. {brand.get('avatar_prompt', '')}",
+    # A channel without a mascot (music, ambience) gets its symbol instead of a face.
+    images.generate(f"YouTube channel avatar, square, one centered subject, bold and readable at small size, no text. "
+                    f"Style: {style}. Subject: {hero.get('description', '')}. {brand.get('avatar_prompt', '')}",
                     raw, "1:1", label=hero.get("name", "Avatar"), role="thumbnail", seed=2)
     ImageOps.fit(Image.open(raw).convert("RGB"), (800, 800), Image.LANCZOS).save(d / "avatar.jpg", quality=92)
     raw.unlink(missing_ok=True)

@@ -201,13 +201,13 @@ JSON: {{
  "why": "почему этот стиль подходит нише (рус.)",
  "style_prompt": "English style prompt used for EVERY video frame (medium, line, palette, lighting, mood)",
  "palette": ["#hex", "#hex", "#hex", "#hex"],
- "hero": {{"name": "...", "description": "English visual description of the recurring mascot character"}},
+ "hero": {{"name": "...", "description": "English visual description of the recurring mascot character; if the owner wants no character (e.g. a music or ambience channel), the channel's visual symbol instead"}},
  "thumbnail_rules": ["правила превью канала (рус.), 4-6 пунктов"],
  "channel_names": ["5 English channel name ideas"],
  "description": "English channel description for the About section, 2 short paragraphs",
  "keywords": ["10 channel keywords"],
  "banner_prompt": "English prompt for a 16:9 channel banner in this style; important content centered, no text",
- "avatar_prompt": "English prompt for a square channel avatar: the hero's face, bold, readable when tiny, no text"
+ "avatar_prompt": "English prompt for a square channel avatar: the hero's face (or the channel symbol if there is no character), bold, readable when tiny, no text"
 }}"""
     demo = {
         "style_name": (preset or {}).get("name", "Demo style"), "why": "Демо-режим.",
