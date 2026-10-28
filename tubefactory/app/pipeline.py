@@ -419,7 +419,7 @@ def stage_images(pid, force=False):
     p = get_project(pid)
     scenes = p["script"]["scenes"]
     todo = [s["idx"] for s in scenes if force or not s["image"]]
-    set_stage(pid, "images", status="running", error=None,
+    set_stage(pid, "images", status="running", error=None, note=f"0/{len(todo)}",
               progress=int((len(scenes) - len(todo)) / max(len(scenes), 1) * 100))
     log(pid, f"рисую {len(todo)} кадров", "illustrator")
     workers = max(1, int(load_settings()["image_workers"]))
@@ -441,15 +441,18 @@ def stage_images(pid, force=False):
                     p2["script"]["scenes"][i].update(status="error", error=str(e)[:300])
                 log(pid, f"Ошибка кадра {i + 1}: {e}")
             done = sum(1 for s in get_project(pid)["script"]["scenes"] if s["image"])
-            set_stage(pid, "images", progress=int(done / len(scenes) * 100))
+            finished = sum(1 for g in futures if g.done())
+            set_stage(pid, "images", progress=int(done / len(scenes) * 100),
+                      note=f"{finished}/{len(todo)}" + (f", ошибок {len(errors)}" if errors else ""))
             if pid in _cancel or pid in _over_budget:
                 for other in futures:
                     other.cancel()
     _check(pid)
     if errors:
         raise RuntimeError(f"Не удалось сгенерировать кадры: {', '.join(str(i + 1) for i in errors)}")
+    set_stage(pid, "images", note="проверка героя")
     _check_hero_frames(pid, only=None if force else set(todo))
-    set_stage(pid, "images", status="done", progress=100)
+    set_stage(pid, "images", status="done", progress=100, note=None)
 
 
 def _check_hero_frames(pid, only=None):

@@ -382,6 +382,10 @@ def create_project(body: dict = Body(...)):
 def project(pid: str):
     p = _project(pid)
     p["busy"] = jobs.is_busy(pid)
+    for st in p["stages"].values():
+        if st["status"] == "running" and not p["busy"]:
+            # Nothing is working on it: the run ended without updating the stage.
+            st.update(status="error", error="этап прерван — нажмите «Продолжить генерацию»")
     sc = p.get("script") or {}
     scenes = len(sc.get("scenes") or []) or p["scene_count"]
     p["estimate"] = pricing.estimate(scenes, len(sc.get("characters") or []) or 2,

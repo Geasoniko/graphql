@@ -280,7 +280,7 @@ const STEP_STATUS = { done: "готово", running: "идёт", error: "оши�
 
 function stepHTML(p, k, st) {
   const locked = p.busy || (!p.script && k !== "script");
-  const label = st.status === "running" ? `идёт · ${st.progress}%` : STEP_STATUS[st.status] || st.status;
+  const label = st.status === "running" ? `идёт · ${st.note ? `${st.note} · ` : ""}${st.progress}%` : STEP_STATUS[st.status] || st.status;
   return `<div class="step ${st.status} ${locked ? "locked" : ""}" id="stage-${k}" data-step="${k}"
     title="${locked ? "" : st.status === "done" ? "Нажмите, чтобы переделать этап" : "Нажмите, чтобы запустить этап"}">
     <div class="n">${STAGE_NAMES[k]}</div><div class="st">${label}</div>
