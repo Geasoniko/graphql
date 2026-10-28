@@ -8,7 +8,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agents, analytics, branding, company, config, jobs, llm, pipeline, pricing, scenarist, stats, storage, styles, system, tts, youtube
+from . import agents, analytics, branding, company, competitors, config, jobs, llm, pipeline, pricing, scenarist, stats, storage, styles, system, tts, youtube
 from .config import WEB
 
 
@@ -323,6 +323,31 @@ def channel_stats(cid: str, days: int = 28, fresh: bool = False):
         raise HTTPException(404, "Канал не найден")
     try:
         return stats.fetch(cid, max(1, min(days, 3650)), fresh)
+    except RuntimeError as e:
+        _fail(e)
+
+
+@app.get("/api/channels/{cid}/competitors")
+def get_competitors(cid: str):
+    try:
+        ch = storage.get_channel(cid)
+    except KeyError:
+        raise HTTPException(404, "Канал не найден")
+    return {"links": ch.get("competitors") or [], "report": competitors.cached(cid)}
+
+
+@app.post("/api/channels/{cid}/competitors")
+def analyze_competitors(cid: str, body: dict = Body(...)):
+    """Competitors' videos, upload times and hits with rule-based advice — free, no AI."""
+    try:
+        storage.get_channel(cid)
+    except KeyError:
+        raise HTTPException(404, "Канал не найден")
+    links = body.get("links") or []
+    if isinstance(links, str):
+        links = links.splitlines()
+    try:
+        return competitors.analyze(cid, links, bool(body.get("fresh")))
     except RuntimeError as e:
         _fail(e)
 

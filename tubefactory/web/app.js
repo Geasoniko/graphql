@@ -829,12 +829,12 @@ pages.niches = async () => {
 const fmtNum = (n) => Math.round(n || 0).toLocaleString("ru-RU");
 const fmtDur = (sec) => `${Math.floor((sec || 0) / 60)}:${String(Math.round(sec || 0) % 60).padStart(2, "0")}`;
 
-function barRows(rows, label, value, total, extra = () => "") {
+function barRows(rows, label, value, total, extra = () => "", fmt = null) {
   const max = Math.max(...rows.map(value), 1);
   return rows.map((r) => `<div class="stat-row">
     <span class="stat-label">${label(r)}</span>
     <div class="bar grow"><div style="width:${Math.round(value(r) / max * 100)}%"></div></div>
-    <span class="stat-val">${total ? `${Math.round(value(r) / total * 100)}%` : fmtNum(value(r))}</span>${extra(r)}</div>`).join("");
+    <span class="stat-val">${fmt ? fmt(r) : total ? `${Math.round(value(r) / total * 100)}%` : fmtNum(value(r))}</span>${extra(r)}</div>`).join("");
 }
 
 pages.stats = async () => {
@@ -909,6 +909,80 @@ pages.stats = async () => {
   await draw();
 };
 
+// ---------------- competitors (YouTube Data API, free, no AI) ----------------
+
+pages.competitors = async () => {
+  if (!cache.channels.length) {
+    view.innerHTML = `<div class="card">${emptyState("🕵️", "Сначала создайте канал", "Конкуренты сохраняются для каждого вашего канала.")}</div>`;
+    return;
+  }
+  const state = pages.competitors.state ||= { cid: cache.channels[0].id };
+  if (!cache.channels.some((c) => c.id === state.cid)) state.cid = cache.channels[0].id;
+  const saved = await api(`/api/channels/${state.cid}/competitors`);
+  view.innerHTML = `
+    <div class="card col">
+      <div class="row"><div class="col grow" style="gap:2px"><h1 style="margin:0">🕵️ Анализ конкурентов</h1>
+        <div class="muted small">Их видео, просмотры, время выхода и хиты → советы для вашего канала. Бесплатно, без ИИ.</div></div>
+        <select id="cp-ch">${options(cache.channels.map((c) => [c.id, c.name]), state.cid)}</select></div>
+      <label>Ссылки на каналы конкурентов — по одной на строку (5–10 каналов)
+        <textarea id="cp-links" rows="6" placeholder="https://www.youtube.com/@channel1&#10;https://www.youtube.com/@channel2&#10;https://www.youtube.com/channel/UC...">${esc(saved.links.join("\n"))}</textarea></label>
+      <div class="row"><button class="btn primary" id="cp-go">🔍 Анализировать</button>
+        <span class="muted small">Берутся последние 50 видео каждого канала. Результат хранится 6 часов.</span></div>
+    </div>
+    <div id="cp-body"></div>`;
+  $("#cp-ch").onchange = (e) => { state.cid = e.target.value; pages.competitors(); };
+  const show = (d) => {
+    const maxHour = Math.max(...Object.values(d.hour_scores || {}), 1);
+    $("#cp-body").innerHTML = `
+      ${d.errors?.length ? `<div class="alert">${d.errors.map((e) => `${esc(e.link)}: ${esc(e.error)}`).join("<br>")}</div>` : ""}
+      <div class="card"><h2>💡 Рекомендации для вас</h2><div class="col" style="gap:6px">${d.tips.map((t) => `<div>${esc(t)}</div>`).join("")}</div></div>
+      <div class="card"><h2>Каналы</h2>
+        <table class="small" style="width:100%;border-collapse:collapse">
+          <tr class="muted"><td>Канал</td><td style="text-align:right">Подписчики</td><td style="text-align:right">Обычно просмотров</td><td style="text-align:right">Видео в неделю</td><td style="text-align:right">Средняя длина</td><td style="text-align:right">Shorts</td><td>Лучшее видео</td></tr>
+          ${d.channels.map((c) => `<tr>
+            <td><a href="${esc(c.url)}" target="_blank">${esc(c.title)}</a></td>
+            <td style="text-align:right">${fmtNum(c.subscribers)}</td><td style="text-align:right">${fmtNum(c.median_views)}</td>
+            <td style="text-align:right">${c.per_week}</td><td style="text-align:right">${c.avg_minutes} мин</td>
+            <td style="text-align:right">${c.shorts_share}%</td>
+            <td>${c.best ? `<a href="https://youtu.be/${esc(c.best.video_id)}" target="_blank">${esc(c.best.title)}</a> · ${fmtNum(c.best.views)}` : "—"}</td></tr>`).join("")}
+        </table></div>
+      <div class="grid-2">
+        <div class="card"><h2>⏰ Час выхода → успех</h2>
+          <div class="muted small" style="margin-bottom:6px">Во сколько раз видео, вышедшие в этот час (ваше местное время), набрали больше обычного у своего канала.</div>
+          ${Object.keys(d.hour_scores || {}).length ? barRows(Object.entries(d.hour_scores).map(([h, s]) => ({ h, s, n: d.hour_counts[h] })),
+            (x) => `${String(x.h).padStart(2, "0")}:00 <span class="muted">(${x.n} видео)</span>`, (x) => x.s, 0,
+            () => "", (x) => `${x.s}×`) : '<div class="muted">Мало данных</div>'}</div>
+        <div class="card"><h2>⏱ Длина видео → успех</h2>
+          ${d.durations?.length ? barRows(d.durations, (x) => `${esc(x.bucket)} <span class="muted">(${x.videos} видео)</span>`, (x) => x.x_median, 0,
+            () => "", (x) => `${x.x_median}×`) : '<div class="muted">Мало данных</div>'}</div>
+      </div>
+      <div class="card"><h2>🔥 Хиты конкурентов — темы для ваших видео</h2>
+        ${d.hits.length ? `<table class="small" style="width:100%;border-collapse:collapse">
+          <tr class="muted"><td>Видео</td><td>Канал</td><td style="text-align:right">Просмотры</td><td style="text-align:right">× обычного</td><td></td></tr>
+          ${d.hits.map((v, i) => `<tr><td><a href="https://youtu.be/${esc(v.video_id)}" target="_blank">${esc(v.title)}</a></td>
+            <td class="muted">${esc(v.channel)}</td><td style="text-align:right">${fmtNum(v.views)}</td>
+            <td style="text-align:right"><span class="badge ok">${v.x_median}×</span></td>
+            <td style="text-align:right"><button class="btn sm" data-hit="${i}" title="Создать видео на эту тему для вашего канала">➕ Своя версия</button></td></tr>`).join("")}
+        </table>` : '<div class="muted">Хитов (в 3+ раза больше обычного) не найдено.</div>'}</div>
+      <div class="muted small">Обновлено: ${new Date(d.fetched * 1000).toLocaleString("ru-RU")}</div>`;
+    $$("[data-hit]").forEach((b) => b.onclick = () => guard(async () => {
+      const v = d.hits[b.dataset.hit];
+      const p = await api("/api/projects", { body: { channel_id: state.cid,
+        idea: `Our own original take on the topic of a competitor's hit video "${v.title}" (${v.channel}, ${v.views} views). Same topic and appeal, new angle, our channel's style and mascot — do not copy.` } });
+      toast("Проект создан — проверьте и запустите"); location.hash = `#/project/${p.id}`;
+    }, b));
+  };
+  if (saved.report) show(saved.report);
+  $("#cp-go").onclick = (e) => guard(async () => {
+    $("#cp-body").innerHTML = '<div class="card"><div class="spinner"></div> Загружаю каналы и видео конкурентов…</div>';
+    try {
+      show(await api(`/api/channels/${state.cid}/competitors`, { body: { links: $("#cp-links").value, fresh: true } }));
+    } catch (err) {
+      $("#cp-body").innerHTML = `<div class="alert">${esc(err.message)}</div>`;
+    }
+  }, e.target);
+};
+
 // ---------------- settings ----------------
 
 pages.settings = async () => {
@@ -947,6 +1021,7 @@ pages.settings = async () => {
 
       <h2 class="wide">YouTube</h2>
       <label class="wide">Файл OAuth-клиента Google (client_secret.json)<input id="s-youtube_client_secret" value="${esc(s.youtube_client_secret)}"></label>
+      <label class="wide">YouTube API key <span class="muted">(не обязательно: для анализа конкурентов, пока ни один канал не подключён)</span><input id="s-youtube_api_key" value="${esc(s.youtube_api_key || "")}"></label>
       <div class="wide"><button class="btn primary" id="s-save">Сохранить</button></div>
     </div>`;
   const drawSys = async () => {
@@ -996,7 +1071,7 @@ pages.settings = async () => {
 
 const PAGE_TITLES = {
   home: "🏠 Главная", company: "🏢 Компания", projects: "🎬 Проекты", queue: "⏳ Очередь",
-  scenarist: "✨ AI-сценарист", channels: "📺 Каналы", stats: "📊 Статистика", niches: "🔎 Поиск ниш", settings: "⚙️ Настройки",
+  scenarist: "✨ AI-сценарист", channels: "📺 Каналы", stats: "📊 Статистика", competitors: "🕵️ Конкуренты", niches: "🔎 Поиск ниш", settings: "⚙️ Настройки",
 };
 
 function setTitle(text) {

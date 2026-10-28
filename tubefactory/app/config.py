@@ -46,6 +46,7 @@ DEFAULTS = {
     "music_volume": 0.12,
     # YouTube: OAuth client from Google Cloud Console (Desktop app).
     "youtube_client_secret": str(DATA / "client_secret.json"),
+    "youtube_api_key": "",  # public data (competitors) when no channel is connected yet
     # Without any API key the app runs in demo mode with placeholder
     # script, images and voice so the whole pipeline can be tried offline.
     "demo_mode": False,
