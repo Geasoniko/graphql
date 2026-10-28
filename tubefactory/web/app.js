@@ -904,6 +904,7 @@ pages.stats = async () => {
             <td style="text-align:right"><span class="badge ${v.retention >= 50 ? "ok" : v.retention < 30 ? "warn" : ""}">${v.retention}%</span></td>
             <td style="text-align:right">+${fmtNum(v.subs)}</td></tr>`).join("")}
         </table></div>
+      ${d.missing?.length ? `<div class="muted small">YouTube не отдал часть данных (${esc(d.missing.join(", "))}) — так бывает на небольших каналах и коротких периодах; попробуйте период подлиннее.</div>` : ""}
       <div class="muted small">Обновлено: ${new Date(d.fetched * 1000).toLocaleString("ru-RU")} · YouTube обновляет статистику с задержкой 1–2 дня.</div>`;
   };
   await draw();

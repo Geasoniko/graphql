@@ -92,6 +92,24 @@ def _collect(channel_id, days):
     end = dt.date.today()
     start = end - dt.timedelta(days=days)
 
+    missing = []
+
+    def optional(name, *args, **kw):
+        """A section YouTube can't answer (its API sometimes returns 500 for a breakdown,
+        e.g. on small channels) is left empty instead of failing the whole page."""
+        for attempt in range(2):
+            try:
+                return query(*args, **kw)
+            except Exception as e:
+                text = str(e)
+                if not any(f"HttpError {c}" in text for c in (500, 503, 400)):
+                    raise  # access problems are reported to the user
+                if attempt == 0 and "HttpError 400" not in text:
+                    time.sleep(1)  # a 500 is often momentary: try once more
+                    continue
+                missing.append(name)
+                return []
+
     def query(metrics, dimensions=None, sort=None, limit=None, filters=None):
         kw = {"ids": "channel==MINE", "startDate": start.isoformat(), "endDate": end.isoformat(),
               "metrics": metrics}
@@ -107,15 +125,15 @@ def _collect(channel_id, days):
 
     totals = query("views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,"
                    "subscribersGained,subscribersLost,likes,comments,shares")
-    daily = query("views,estimatedMinutesWatched,subscribersGained", "day", "day")
-    countries = query("views,estimatedMinutesWatched,averageViewDuration", "country", "-views", 25)
-    demo = query("viewerPercentage", "ageGroup,gender")
-    traffic = query("views,estimatedMinutesWatched", "insightTrafficSourceType", "-views")
-    devices = query("views,estimatedMinutesWatched", "deviceType", "-views")
-    subscribed = query("views,averageViewDuration", "subscribedStatus")
-    videos = query("views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,"
-                   "subscribersGained,likes", "video", "-views", 25)
-    titles = youtube.video_titles(channel_id, [v["video"] for v in videos])
+    daily = optional("по дням", "views,estimatedMinutesWatched,subscribersGained", "day", "day")
+    countries = optional("страны", "views,estimatedMinutesWatched,averageViewDuration", "country", "-views", 25)
+    demo = optional("возраст и пол", "viewerPercentage", "ageGroup,gender")
+    traffic = optional("источники", "views,estimatedMinutesWatched", "insightTrafficSourceType", "-views")
+    devices = optional("устройства", "views,estimatedMinutesWatched", "deviceType", "-views")
+    subscribed = optional("подписчики/не подписчики", "views", "subscribedStatus")
+    videos = optional("видео", "views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,"
+                      "subscribersGained,likes", "video", "-views", 25)
+    titles = youtube.video_titles(channel_id, [v["video"] for v in videos]) if videos else {}
 
     t = totals[0] if totals else {}
     total_views = sum(c["views"] for c in countries) or t.get("views") or 0
@@ -137,8 +155,8 @@ def _collect(channel_id, days):
                      "views": x["views"], "minutes": x["estimatedMinutesWatched"]} for x in traffic],
         "devices": [{"device": DEVICES.get(x["deviceType"], x["deviceType"]), "views": x["views"]}
                     for x in devices],
-        "subscribed": {x["subscribedStatus"]: {"views": x["views"], "avg_duration": x["averageViewDuration"]}
-                       for x in subscribed},
+        "subscribed": {x["subscribedStatus"]: {"views": x["views"]} for x in subscribed},
+        "missing": missing,
         "videos": [{"video_id": v["video"], "title": titles.get(v["video"], v["video"]), "views": v["views"],
                     "minutes": v["estimatedMinutesWatched"], "avg_duration": v["averageViewDuration"],
                     "retention": round(v["averageViewPercentage"], 1), "subs": v["subscribersGained"],
