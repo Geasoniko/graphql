@@ -30,6 +30,7 @@ PER_IMAGE = {
     "bytedance-seed/seedream-5-0-flash": 0.018,
     "bytedance-seed/seedream-4.5": 0.04,
     "black-forest-labs/flux.2-klein-4b": 0.015,
+    "black-forest-labs/flux-3-image-klein": 0.009,
     "sourceful/riverflow-v2-fast": 0.02,
 }
 IMAGE_TOKENS = 1290       # output tokens of one ~1K image on Gemini image models

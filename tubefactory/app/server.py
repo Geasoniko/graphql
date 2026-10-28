@@ -455,8 +455,8 @@ IMAGE_CANDIDATES = [  # October 2026 prices per ~1920x1080 image
     {"id": "google/gemini-3.1-flash-image", "name": "Nano Banana 2 · ~$0.078"},
     {"id": "google/gemini-3.1-flash-lite-image", "name": "Nano Banana 2 Lite · ~$0.039"},
     {"id": "qwen/qwen-image-2.1-turbo", "name": "Qwen Image 2.1 Turbo · $0.0184"},
-    {"id": "qwen/qwen-image-3", "name": "Qwen Image 3 · $0.03"},
     {"id": "bytedance-seed/seedream-5-0-flash", "name": "Seedream 5.0 Flash · $0.018"},
+    {"id": "black-forest-labs/flux-3-image-klein", "name": "FLUX 3 Klein · ~$0.009"},
     {"id": "black-forest-labs/flux.2-klein-4b", "name": "FLUX.2 Klein 4B · ~$0.015"},
 ]
 

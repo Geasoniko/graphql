@@ -161,10 +161,17 @@ def generate_image(prompt, references=(), aspect="16:9", model=None, role="illus
         "model": model or agents.model_for(role) or settings["image_model"],
         "messages": [{"role": "user", "content": content}],
         "modalities": ["image", "text"],
-        "image_config": {"aspect_ratio": aspect},
+        # 1K is plenty for a 1080p video; per-image models bill by resolution tier.
+        "image_config": {"aspect_ratio": aspect, "image_size": "1K"},
     }
     for attempt in range(3):
-        data = _post(payload, settings, role=role)
+        try:
+            data = _post(payload, settings, role=role)
+        except LLMError as e:
+            if "image_size" not in str(e) or "image_size" not in payload["image_config"]:
+                raise
+            payload["image_config"].pop("image_size")  # a model that doesn't take the size hint
+            data = _post(payload, settings, role=role)
         msg = data["choices"][0]["message"]
         for img in msg.get("images") or []:
             url = img.get("image_url", {}).get("url", "")
