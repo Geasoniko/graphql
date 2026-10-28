@@ -824,6 +824,91 @@ pages.niches = async () => {
   }, e.target);
 };
 
+// ---------------- statistics (YouTube Analytics, free, no AI) ----------------
+
+const fmtNum = (n) => Math.round(n || 0).toLocaleString("ru-RU");
+const fmtDur = (sec) => `${Math.floor((sec || 0) / 60)}:${String(Math.round(sec || 0) % 60).padStart(2, "0")}`;
+
+function barRows(rows, label, value, total, extra = () => "") {
+  const max = Math.max(...rows.map(value), 1);
+  return rows.map((r) => `<div class="stat-row">
+    <span class="stat-label">${label(r)}</span>
+    <div class="bar grow"><div style="width:${Math.round(value(r) / max * 100)}%"></div></div>
+    <span class="stat-val">${total ? `${Math.round(value(r) / total * 100)}%` : fmtNum(value(r))}</span>${extra(r)}</div>`).join("");
+}
+
+pages.stats = async () => {
+  const channels = cache.channels.filter((c) => c.connected);
+  if (!channels.length) {
+    view.innerHTML = `<div class="card">${emptyState("📊", "Нет подключённых каналов",
+      "Подключите YouTube к каналу в разделе «Каналы» — здесь появятся страны, возраст, источники и удержание.")}</div>`;
+    return;
+  }
+  const state = pages.stats.state ||= { cid: channels[0].id, days: 28 };
+  if (!channels.some((c) => c.id === state.cid)) state.cid = channels[0].id;
+  const draw = async (fresh = false) => {
+    view.innerHTML = `
+      <div class="card row">
+        <div class="col grow" style="gap:2px"><h1 style="margin:0">📊 Статистика канала</h1>
+          <div class="muted small">Данные YouTube Analytics — бесплатно, без ИИ и OpenRouter</div></div>
+        <select id="st-ch">${options(channels.map((c) => [c.id, c.name]), state.cid)}</select>
+        <div class="tabs">${[[7, "7 дней"], [28, "28 дней"], [90, "90 дней"], [365, "Год"]].map(([d, t]) =>
+          `<button class="btn sm ${d === state.days ? "active" : ""}" data-days="${d}">${t}</button>`).join("")}</div>
+        <button class="btn sm" id="st-refresh">↻ Обновить</button>
+      </div>
+      <div id="st-body"><div class="card"><div class="spinner"></div> Загружаю статистику из YouTube…</div></div>`;
+    $("#st-ch").onchange = (e) => { state.cid = e.target.value; draw(); };
+    $$("[data-days]").forEach((b) => b.onclick = () => { state.days = +b.dataset.days; draw(); });
+    $("#st-refresh").onclick = () => draw(true);
+    let d;
+    try {
+      d = await api(`/api/channels/${state.cid}/stats?days=${state.days}${fresh ? "&fresh=true" : ""}`);
+    } catch (e) {
+      $("#st-body").innerHTML = `<div class="alert">${esc(e.message)}</div>`;
+      return;
+    }
+    const t = d.totals || {};
+    const views = t.views || 0;
+    const maxDay = Math.max(...d.daily.map((x) => x.views), 1);
+    $("#st-body").innerHTML = `
+      <div class="grid stats">
+        <div class="card"><div class="muted">Просмотры</div><div class="stat">${fmtNum(views)}</div></div>
+        <div class="card"><div class="muted">Часы просмотра</div><div class="stat">${fmtNum((t.estimatedMinutesWatched || 0) / 60)}</div></div>
+        <div class="card"><div class="muted">Средний просмотр</div><div class="stat">${fmtDur(t.averageViewDuration)}</div></div>
+        <div class="card"><div class="muted">Досматривают</div><div class="stat">${Math.round(t.averageViewPercentage || 0)}%</div></div>
+        <div class="card"><div class="muted">Подписчики</div><div class="stat">${(t.subscribersGained || 0) - (t.subscribersLost || 0) >= 0 ? "+" : ""}${fmtNum((t.subscribersGained || 0) - (t.subscribersLost || 0))}</div></div>
+        <div class="card"><div class="muted">Лайки · комментарии</div><div class="stat">${fmtNum(t.likes)} · ${fmtNum(t.comments)}</div></div>
+      </div>
+      <div class="card"><h2>💡 Выводы</h2><div class="col" style="gap:6px">${d.insights.map((x) => `<div>${esc(x)}</div>`).join("")}</div></div>
+      ${d.daily.length ? `<div class="card"><h2>Просмотры по дням</h2>
+        <div class="day-chart">${d.daily.map((x) => `<div title="${esc(x.day)}: ${fmtNum(x.views)}" style="height:${Math.max(2, Math.round(x.views / maxDay * 100))}%"></div>`).join("")}</div>
+        <div class="row muted small"><span class="grow">${esc(d.start)}</span><span>${esc(d.end)}</span></div></div>` : ""}
+      <div class="grid-2">
+        <div class="card"><h2>🌍 Страны</h2>${d.countries.length ? barRows(d.countries.slice(0, 15),
+          (c) => `${c.flag} ${esc(c.name)}`, (c) => c.views, 0,
+          (c) => `<span class="muted small" style="width:44px;text-align:right">${c.share}%</span>${c.high_rpm ? '<span title="дорогая реклама">💰</span>' : "<span style=\"width:1.2em\"></span>"}`)
+          : '<div class="muted">Нет данных</div>'}
+          <div class="muted small" style="margin-top:6px">💰 — страны с дорогой рекламой (больше дохода с просмотра).</div></div>
+        <div class="card"><h2>👥 Возраст и пол</h2>${d.audience.length ? barRows(d.audience.sort((a, b) => b.percent - a.percent),
+          (a) => `${esc(a.gender)} ${esc(a.age)}`, (a) => a.percent, 100)
+          : '<div class="muted">YouTube показывает возраст и пол, когда зрителей достаточно много.</div>'}</div>
+        <div class="card"><h2>🚦 Откуда приходят</h2>${barRows(d.traffic, (x) => esc(x.source), (x) => x.views, views)}</div>
+        <div class="card"><h2>📱 Устройства</h2>${barRows(d.devices, (x) => esc(x.device), (x) => x.views, views)}
+          ${d.subscribed.SUBSCRIBED ? `<div class="muted small" style="margin-top:8px">Подписчики дают ${Math.round(d.subscribed.SUBSCRIBED.views / (views || 1) * 100)}% просмотров.</div>` : ""}</div>
+      </div>
+      <div class="card"><h2>🏆 Видео за период</h2>
+        <table class="small" style="width:100%;border-collapse:collapse">
+          <tr class="muted"><td>Видео</td><td style="text-align:right">Просмотры</td><td style="text-align:right">Средний просмотр</td><td style="text-align:right">Досматривают</td><td style="text-align:right">Подписки</td></tr>
+          ${d.videos.map((v) => `<tr><td><a href="https://youtu.be/${esc(v.video_id)}" target="_blank">${esc(v.title)}</a></td>
+            <td style="text-align:right">${fmtNum(v.views)}</td><td style="text-align:right">${fmtDur(v.avg_duration)}</td>
+            <td style="text-align:right"><span class="badge ${v.retention >= 50 ? "ok" : v.retention < 30 ? "warn" : ""}">${v.retention}%</span></td>
+            <td style="text-align:right">+${fmtNum(v.subs)}</td></tr>`).join("")}
+        </table></div>
+      <div class="muted small">Обновлено: ${new Date(d.fetched * 1000).toLocaleString("ru-RU")} · YouTube обновляет статистику с задержкой 1–2 дня.</div>`;
+  };
+  await draw();
+};
+
 // ---------------- settings ----------------
 
 pages.settings = async () => {
@@ -911,7 +996,7 @@ pages.settings = async () => {
 
 const PAGE_TITLES = {
   home: "🏠 Главная", company: "🏢 Компания", projects: "🎬 Проекты", queue: "⏳ Очередь",
-  scenarist: "✨ AI-сценарист", channels: "📺 Каналы", niches: "🔎 Поиск ниш", settings: "⚙️ Настройки",
+  scenarist: "✨ AI-сценарист", channels: "📺 Каналы", stats: "📊 Статистика", niches: "🔎 Поиск ниш", settings: "⚙️ Настройки",
 };
 
 function setTitle(text) {

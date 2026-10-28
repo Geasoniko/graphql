@@ -11,7 +11,9 @@ import requests
 from .config import CHANNELS_DIR, load_settings
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
-          "https://www.googleapis.com/auth/youtube.readonly"]
+          "https://www.googleapis.com/auth/youtube.readonly",
+          # Views by country, age, traffic source... (the statistics page).
+          "https://www.googleapis.com/auth/yt-analytics.readonly"]
 
 
 def _token_path(channel_id):
@@ -31,19 +33,54 @@ def authorize(channel_id):
     return channel_info(channel_id)
 
 
-def _service(channel_id):
+def _credentials(channel_id):
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from googleapiclient.discovery import build
 
     path = _token_path(channel_id)
     if not path.exists():
         raise RuntimeError("Канал не подключён к YouTube: нажмите «Подключить YouTube» в разделе Каналы")
-    creds = Credentials.from_authorized_user_file(str(path), SCOPES)
+    # No scopes argument: the token keeps the permissions it was granted (older ones lack analytics).
+    creds = Credentials.from_authorized_user_file(str(path))
     if not creds.valid and creds.refresh_token:
         creds.refresh(Request())
         path.write_text(creds.to_json(), "utf-8")
-    return build("youtube", "v3", credentials=creds, cache_discovery=False)
+    return creds
+
+
+def _service(channel_id):
+    from googleapiclient.discovery import build
+
+    return build("youtube", "v3", credentials=_credentials(channel_id), cache_discovery=False)
+
+
+def has_analytics(channel_id):
+    """Was the channel connected with the YouTube Analytics permission?"""
+    import json
+
+    try:
+        scopes = json.loads(_token_path(channel_id).read_text("utf-8")).get("scopes") or []
+    except (OSError, ValueError):
+        return False
+    return SCOPES[2] in scopes
+
+
+def analytics_service(channel_id):
+    from googleapiclient.discovery import build
+
+    if not has_analytics(channel_id):
+        raise RuntimeError("Канал подключён без доступа к статистике. В разделе «Каналы» нажмите "
+                           "«Подключить YouTube» ещё раз и разрешите просмотр статистики YouTube Analytics.")
+    return build("youtubeAnalytics", "v2", credentials=_credentials(channel_id), cache_discovery=False)
+
+
+def video_titles(channel_id, ids):
+    out = {}
+    yt = _service(channel_id)
+    for i in range(0, len(ids), 50):
+        resp = yt.videos().list(part="snippet", id=",".join(ids[i:i + 50])).execute()
+        out.update({v["id"]: v["snippet"]["title"] for v in resp.get("items", [])})
+    return out
 
 
 def is_connected(channel_id):

@@ -234,3 +234,11 @@ input[type="range"] { padding: 0; accent-color: var(--accent-2); }
 .grid.stats { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .slider-label { display: flex; gap: 6px; align-items: baseline; color: var(--muted); font-size: 12px; }
 .slider-label b { color: var(--text); font-size: 15px; }
+
+/* statistics page */
+.stat-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 14px; }
+.stat-row .stat-label { width: 42%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-row .stat-val { width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+.stat-row .bar { height: 8px; }
+.day-chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; margin: 8px 0; }
+.day-chart > div { flex: 1; background: linear-gradient(180deg, var(--accent), var(--accent-2)); border-radius: 3px 3px 0 0; min-width: 2px; }

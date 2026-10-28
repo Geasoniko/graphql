@@ -8,7 +8,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agents, analytics, branding, company, config, jobs, llm, pipeline, pricing, scenarist, storage, styles, system, tts, youtube
+from . import agents, analytics, branding, company, config, jobs, llm, pipeline, pricing, scenarist, stats, storage, styles, system, tts, youtube
 from .config import WEB
 
 
@@ -142,6 +142,7 @@ def channels():
     out = []
     for c in storage.list_channels():
         c["connected"] = youtube.is_connected(c["id"])
+        c["analytics"] = youtube.has_analytics(c["id"])
         c["hero_master"] = (config.CHANNELS_DIR / c["id"] / "hero.png").exists()
         out.append(c)
     return out
@@ -311,6 +312,19 @@ def channel_media(cid: str, name: str):
     if f.parent != (config.CHANNELS_DIR / cid).resolve() or f.suffix not in (".jpg", ".png") or not f.is_file():
         raise HTTPException(404)
     return FileResponse(f, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/channels/{cid}/stats")
+def channel_stats(cid: str, days: int = 28, fresh: bool = False):
+    """YouTube Analytics for the statistics page — free, no AI."""
+    try:
+        storage.get_channel(cid)
+    except KeyError:
+        raise HTTPException(404, "Канал не найден")
+    try:
+        return stats.fetch(cid, max(1, min(days, 3650)), fresh)
+    except RuntimeError as e:
+        _fail(e)
 
 
 @app.post("/api/channels/{cid}/analyze")
