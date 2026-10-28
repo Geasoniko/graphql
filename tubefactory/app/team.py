@@ -220,3 +220,29 @@ JSON: {{
         "banner_prompt": "caveman by a fire, wide landscape", "avatar_prompt": "caveman face",
     }
     return _ask("stylist", system, user, demo)
+
+
+# ---------- hero check (vision) ----------
+
+def compare_character(reference_path, candidate_path, name, description):
+    """Is the character in the candidate image the same as in the reference? -> {"score", "same", "differences"}"""
+    from . import images
+    content = [
+        {"type": "text", "text": (
+            f"Image 1 is the official reference of the channel mascot {name}: {description}.\n"
+            f"Image 2 is a new picture. Is {name} in image 2 the same character as in image 1 "
+            "(same face shape, hair, clothes, colors, proportions and drawing style)? Ignore pose, "
+            "angle, background and other characters. If {name} is not in image 2 at all, score 0.\n"
+            'Reply with JSON only: {"score": 0-10, "same": true/false, "differences": "кратко на русском"}')},
+        {"type": "image_url", "image_url": {"url": images.small_data_url(reference_path)}},
+        {"type": "image_url", "image_url": {"url": images.small_data_url(candidate_path)}},
+    ]
+    try:
+        reply = llm.chat([{"role": "user", "content": content}], role="art_director", temperature=0)
+        out = llm.extract_json(reply)
+    except llm.LLMError as e:
+        if str(e) != "demo":
+            raise
+        return {"score": 10, "same": True, "differences": "демо"}
+    out["score"] = int(out.get("score") or 0)
+    return out

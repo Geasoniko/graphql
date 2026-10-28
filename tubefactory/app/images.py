@@ -87,3 +87,13 @@ def compose_thumbnail(src, dst, text):
         draw.text(((w - tw) / 2, h - size * 1.6), text, font=font, fill=(255, 230, 40),
                   stroke_width=max(4, size // 12), stroke_fill=(0, 0, 0))
     img.save(dst, "JPEG", quality=90)
+
+
+def small_data_url(path, size=512):
+    """Downscaled JPEG as a data URL — enough for a vision model to compare, cheap to send."""
+    import base64
+    img = Image.open(path).convert("RGB")
+    img.thumbnail((size, size))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=85)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()

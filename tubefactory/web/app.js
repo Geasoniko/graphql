@@ -327,10 +327,14 @@ function renderProject(p, keepScroll = false) {
       </div>
     </details>
 
+    ${p.hero_check ? `<div class="card row"><h2 class="grow" style="margin:0">🧬 Герой канала на кадрах</h2>
+      <span class="badge ${p.hero_check.ok === p.hero_check.checked ? "ok" : "warn"}">совпадает на ${p.hero_check.ok} из ${p.hero_check.checked}</span>
+      <span class="badge">средняя оценка ${p.hero_check.avg}/10</span>${p.hero_check.redrawn ? `<span class="badge warn">перерисовано ${p.hero_check.redrawn}</span>` : ""}</div>` : ""}
     ${p.director || p.review ? `<div class="grid-2">
       ${p.director ? `<div class="card"><h2>👔 Решение директора</h2><div class="small pre">${esc(p.director.decision || "")}</div>
         ${p.director.notes_for_team ? `<div class="small muted" style="margin-top:6px">Команде: ${esc(p.director.notes_for_team)}</div>` : ""}</div>` : ""}
       ${p.review ? `<div class="card"><h2>🧐 Шеф-редактор: ${esc(p.review.score)}/10${p.review.originality ? ` · уникальность ${esc(p.review.originality)}/10` : ""}${p.review.rewritten ? ' <span class="badge warn">сценарий переписан</span>' : ""}</h2>
+        ${(p.review.rounds || []).length > 1 ? `<div class="small" style="margin-bottom:6px">📈 ${p.review.rounds.map((r) => `версия ${r.round}: <b>${r.score}/10</b>`).join(" → ")}${p.review.score >= (p.review.target || 8) ? " ✅" : ` ❌ нужно ${p.review.target}+`}</div>` : ""}
         ${p.review.monetization_risk ? `<div class="small" style="margin-bottom:4px">💵 Риск для монетизации: ${esc(p.review.monetization_risk)}</div>` : ""}
         <div class="small">${esc(p.review.verdict || "")}</div>
         ${(p.review.problems || []).length ? `<div class="small muted" style="margin-top:6px">${p.review.problems.map((x) => "• " + esc(x)).join("<br>")}</div>` : ""}</div>` : ""}
@@ -354,7 +358,7 @@ function renderTab(p) {
       <div class="card scene">
         <div class="thumb" data-zoom="${media(p.id, s.image)}">
           ${s.image ? `<img src="${media(p.id, s.image)}" loading="lazy">` : s.status === "running" ? '<div class="spinner"></div>' : '<span class="muted">нет кадра</span>'}
-          <span class="badge num">Сцена ${s.idx + 1}${s.duration ? ` · ${s.duration.toFixed(1)}с` : ""}</span>
+          <span class="badge num">Сцена ${s.idx + 1}${s.duration ? ` · ${s.duration.toFixed(1)}с` : ""}${s.hero_check ? ` · 🧬 ${s.hero_check.score}/10` : ""}</span>
         </div>
         <div class="body">
           ${s.error ? `<div class="small" style="color:var(--err)">${esc(s.error)}</div>` : ""}
@@ -372,7 +376,7 @@ function renderTab(p) {
     return `<div class="grid">${sc.characters.map((c, i) => `
       <div class="card scene">
         <div class="thumb" style="aspect-ratio:1" data-zoom="${media(p.id, c.image)}">${c.image ? `<img src="${media(p.id, c.image)}">` : '<span class="muted">нет изображения</span>'}</div>
-        <div class="body"><h3>${esc(c.name)} <span class="muted small">(${esc(c.id)})</span></h3>
+        <div class="body"><h3>${esc(c.name)} <span class="muted small">(${esc(c.id)})</span>${c.brand_hero ? ' <span class="badge ok">🔒 герой канала</span>' : ""}</h3>
           <textarea data-char="${i}">${esc(c.description)}</textarea>
           <button class="btn sm" data-save-char="${i}">Сохранить описание</button></div>
       </div>`).join("") || '<div class="card muted">Без персонажей</div>'}</div>
@@ -671,6 +675,9 @@ function brandBlock(c) {
           <div><b>Почему этот стиль:</b> ${esc(b.why || "")}</div>
           <div class="row">${(b.palette || []).map((h) => `<span title="${esc(h)}" style="width:28px;height:28px;border-radius:8px;background:${esc(h)};border:1px solid var(--border)"></span>`).join("")}</div>
           ${b.hero ? `<div><b>Герой канала:</b> ${esc(b.hero.name || "")} — <span class="muted">${esc(b.hero.description || "")}</span></div>` : ""}
+          ${c.hero_master ? `<div class="row"><img src="/channel-media/${c.id}/hero.png?v=${ver}" style="width:96px;border-radius:10px;cursor:zoom-in" data-zoom-src="/channel-media/${c.id}/hero.png?v=${ver}">
+            <div class="col" style="gap:4px"><span>🔒 Эталон героя: так он выглядит во всех видео</span><button class="btn sm" data-hero-reset>Нарисовать эталон заново</button></div></div>`
+            : '<div class="muted">Эталон героя появится после первого видео и дальше будет одинаковым во всех видео.</div>'}
           <div><b>Правила превью:</b><br>${(b.thumbnail_rules || []).map((x) => "• " + esc(x)).join("<br>")}</div>
         </div>
         <div class="col small">
@@ -710,6 +717,10 @@ function bindChannels() {
         } finally { link.textContent = "▶ послушать"; }
       });
     };
+    $("[data-hero-reset]", card) && ($("[data-hero-reset]", card).onclick = (e) => confirm("Нарисовать эталон героя заново со следующего видео?") && guard(async () => {
+      await api(`/api/channels/${id}/hero/reset`, { body: {} });
+      toast("Эталон сброшен — следующее видео нарисует героя заново по аватару"); await reroute();
+    }, e.target));
     const presetSel = $("[data-preset]", card);
     const showAbout = () => { const x = (cache.styles || []).find((st) => st.id === presetSel.value); $("[data-preset-about]", card).textContent = x ? x.about : ""; };
     presetSel.onchange = showAbout; showAbout();
@@ -801,6 +812,11 @@ pages.settings = async () => {
       <h2 class="wide">Монтаж</h2>
       <label class="check"><input type="checkbox" id="s-subtitles" ${s.subtitles ? "checked" : ""}> Субтитры в видео</label>
       <label class="check"><input type="checkbox" id="s-ken_burns" ${s.ken_burns ? "checked" : ""}> Движение камеры (Ken Burns)</label>
+      <label class="check"><input type="checkbox" id="s-hero_check" ${s.hero_check !== false ? "checked" : ""}> 🧬 Проверять героя канала на каждом кадре</label>
+      <h2 class="wide">Шеф-редактор</h2>
+      <label>Минимальная оценка сценария<input id="s-min_script_score" type="number" min="5" max="10" value="${s.min_script_score ?? 8}"></label>
+      <label>Попыток доработки<input id="s-max_rewrites" type="number" min="0" max="5" value="${s.max_rewrites ?? 3}"></label>
+      <div class="wide muted small">Видео не пойдёт дальше сценария, пока редактор не поставит минимум эту оценку. Каждая доработка ≈ $0.1–0.3.</div>
       <label>FPS<input id="s-fps" type="number" value="${s.fps}"></label>
       <label class="wide">Фоновая музыка: путь к mp3 или к папке с треками (каждому видео — случайный)<input id="s-background_music" value="${esc(s.background_music)}" placeholder="C:\\Users\\User\\Music\\youtube"></label>
       <div class="wide muted small">Бесплатная музыка без авторских проблем: YouTube Studio → Фонотека (Audio Library). Скачайте 10–20 спокойных треков в одну папку.</div>

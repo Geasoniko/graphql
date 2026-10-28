@@ -5,6 +5,8 @@ Every stage can also be re-run alone, and scenes that are already done are
 skipped, so a failed run resumes."""
 import contextvars
 import random
+import re
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import company, images, scenarist, storage, team, tts, video, youtube
@@ -47,6 +49,51 @@ def _avatar(p):
     return path if _brand(p) and path.exists() else None
 
 
+def _hero_master(p):
+    """The channel's approved drawing of its mascot, shared by all videos (made by the first one)."""
+    from .config import CHANNELS_DIR
+    return CHANNELS_DIR / str(p.get("channel_id")) / "hero.png"
+
+
+def _lock_hero(pid):
+    """Make the stylist's mascot the script's main character, word for word.
+    The writer may rename or re-describe it; here the matching character (or the one
+    in most scenes) becomes the brand hero with the stylist's exact name and look."""
+    p = get_project(pid)
+    hero = (_brand(p) or {}).get("hero") or {}
+    if not hero.get("name") or not p.get("script"):
+        return
+    name, desc = hero["name"], hero.get("description", "")
+    with edit_project(pid) as p2:
+        sc = p2["script"]
+        chars = sc["characters"]
+        key = name.lower()
+        match = next((c for c in chars if c.get("brand_hero")), None) or next(
+            (c for c in chars if key in c["name"].lower() or key in c["id"].lower()
+             or (c["name"].lower() and c["name"].lower() in key)), None)
+        if match is None and chars:
+            counts = {c["id"]: sum(c["id"] in s["characters"] for s in sc["scenes"]) for c in chars}
+            match = max(chars, key=lambda c: counts[c["id"]])
+        if match is None:
+            match = {"id": "hero", "name": name, "description": desc, "image": None}
+            chars.append(match)
+            for s in sc["scenes"]:
+                if not s["characters"]:
+                    s["characters"].append("hero")
+        old_name = match.get("name") or ""
+        changed = match.get("description") != desc or old_name != name
+        match.update(name=name, description=desc, brand_hero=True)
+        if changed:
+            match["image"] = None  # redraw with the locked look
+        if old_name and old_name != name:
+            # The writer called the mascot differently: use the brand name everywhere.
+            pattern = re.compile(rf"\b{re.escape(old_name)}\b")
+            for s in sc["scenes"]:
+                s["image_prompt"] = pattern.sub(name, s["image_prompt"])
+                if pattern.search(s["narration"]):
+                    s.update(narration=pattern.sub(name, s["narration"]), audio=None, words=[], duration=None)
+
+
 def _rel(pid, path):
     return str(path.relative_to(project_dir(pid))).replace("\\", "/")
 
@@ -68,6 +115,7 @@ def stage_script(pid, force=False):
     set_stage(pid, "script", status="done", progress=100)
     for later in ("review", "art", "seo"):
         set_stage(pid, later, status="idle", progress=0)
+    _lock_hero(pid)
 
 
 def _keep_media(old, new):
@@ -80,30 +128,60 @@ def _keep_media(old, new):
 
 
 def stage_review(pid, force=False):
+    """Chief editor loop: review -> writer fixes -> review again, until the script scores
+    at least `min_script_score` (and originality >= 7), keeping the best version.
+    If it never gets there the stage stops, so a weak script is never produced."""
     p = get_project(pid)
     if p["stages"]["review"]["status"] == "done" and not force:
         return
-    set_stage(pid, "review", status="running", progress=20, error=None)
-    log(pid, "читаю сценарий…", "editor")
+    settings = load_settings()
+    target = int(settings.get("min_script_score") or 8)
+    rounds = int(settings.get("max_rewrites") or 3)
+    set_stage(pid, "review", status="running", progress=10, error=None)
     history = [x["title"] for x in storage.list_projects()
                if x["channel_id"] and x["channel_id"] == p["channel_id"] and x["id"] != pid][:15]
-    review = team.review_script(p["script"], p["idea"], p["language"], history)
-    score = int(review.get("score") or 0)
-    log(pid, f"оценка {score}/10, уникальность {review.get('originality', '—')}/10 — {review.get('verdict', '')}", "editor")
-    original = int(review.get("originality") or 10)
-    if (score < 8 or original < 7) and review.get("fixes"):
-        set_stage(pid, "review", progress=60)
-        log(pid, "дорабатываю по замечаниям редактора…", "writer")
-        new = scenarist.write_script(p["idea"], p["language"], p["scene_count"], p["pacing"], p["style"],
-                                     p["reference"], feedback=review["fixes"] + "\n" +
-                                     "\n".join(review.get("problems") or []), previous=p["script"])
+    trail = []  # every round, for the UI
+    best = None  # (score, script, review)
+    for rnd in range(rounds + 1):
+        _check(pid)
+        p = get_project(pid)
+        log(pid, f"читаю сценарий{f' (версия {rnd + 1})' if rnd else ''}…", "editor")
+        review = team.review_script(p["script"], p["idea"], p["language"], history)
+        score = int(review.get("score") or 0)
+        original = int(review.get("originality") or 10)
+        trail.append({"round": rnd + 1, "score": score, "originality": original, "verdict": review.get("verdict", "")})
+        log(pid, f"оценка {score}/10, уникальность {original}/10 — {review.get('verdict', '')}", "editor")
+        if best is None or score > best[0]:
+            best = (score, p["script"], review)
+        if score >= target and original >= 7:
+            break
+        if rnd == rounds or not review.get("fixes"):
+            break
+        set_stage(pid, "review", progress=int(10 + 80 * (rnd + 1) / (rounds + 1)))
+        log(pid, f"дорабатываю до {target}+/10 по замечаниям редактора…", "writer")
+        new = scenarist.write_script(
+            p["idea"], p["language"], p["scene_count"], p["pacing"], p["style"], p["reference"],
+            feedback=(f"Target: at least {target}/10 from the chief editor.\n{review['fixes']}\n"
+                      + "\n".join(f"- {x}" for x in review.get("problems") or [])
+                      + ("\nKeep these strengths: " + "; ".join(review.get("strengths") or []))),
+            previous=p["script"])
         with edit_project(pid) as p2:
             p2["script"] = _keep_media(p2["script"], new)
             p2["title"] = new["title"]
-        review["rewritten"] = True
-        log(pid, "новая версия сценария готова", "writer")
+        _lock_hero(pid)
+    score, script, review = best
+    review.update(rounds=trail, rewritten=len(trail) > 1, target=target)
     with edit_project(pid) as p2:
+        p2["script"] = script  # the best-scored version wins, even if a later rewrite was worse
+        p2["title"] = script["title"]
         p2["review"] = review
+    _lock_hero(pid)
+    if score < target:
+        log(pid, f"сценарий не дотянул до {target}/10 — видео остановлено до вашего решения", "editor")
+        raise RuntimeError(f"Шеф-редактор: лучшая версия {score}/10 после {len(trail)} проверок, нужно {target}+. "
+                           "Посмотрите замечания, поправьте сцены или снизьте порог в Настройках, "
+                           "затем «Продолжить генерацию».")
+    log(pid, f"сценарий принят: {score}/10 с {len(trail)}-й проверки", "editor")
     set_stage(pid, "review", status="done", progress=100)
 
 
@@ -121,7 +199,7 @@ def stage_art(pid, force=False):
             p2["style"] = art["style"]
         chars = {c["id"]: c for c in sc["characters"]}
         for c in art.get("characters") or []:
-            if c.get("id") in chars and c.get("description"):
+            if c.get("id") in chars and c.get("description") and not chars[c["id"]].get("brand_hero"):
                 chars[c["id"]]["description"] = c["description"]
         for i, a in enumerate(art.get("scenes") or []):
             idx = int(a.get("n", i + 1)) - 1
@@ -163,6 +241,7 @@ def stage_seo(pid, force=False):
 
 
 def stage_characters(pid, force=False):
+    _lock_hero(pid)
     p = get_project(pid)
     chars = p["script"]["characters"]
     set_stage(pid, "characters", status="running", progress=0, error=None)
@@ -170,17 +249,41 @@ def stage_characters(pid, force=False):
         _check(pid)
         if c["image"] and not force:
             continue
-        log(pid, f"рисую персонажа {c['name']}", "illustrator")
         path = project_dir(pid) / "characters" / f"{c['id']}.png"
-        hero = (_brand(p) or {}).get("hero") or {}
-        is_hero = hero.get("name") and hero["name"].lower() in (c["name"].lower(), c["id"].lower())
-        refs = [_avatar(p)] if is_hero and _avatar(p) else []  # the mascot looks the same in every video
-        images.generate(images.character_prompt(p["style"], c), path, "1:1", references=refs,
-                        label=f"{c['name']}\n{c['description']}", seed=i)
+        if c.get("brand_hero"):
+            _draw_brand_hero(pid, c, path, force)
+        else:
+            log(pid, f"рисую персонажа {c['name']}", "illustrator")
+            images.generate(images.character_prompt(p["style"], c), path, "1:1",
+                            label=f"{c['name']}\n{c['description']}", seed=i)
         with edit_project(pid) as p2:
             p2["script"]["characters"][i]["image"] = _rel(pid, path)
         set_stage(pid, "characters", progress=int((i + 1) / len(chars) * 100))
     set_stage(pid, "characters", status="done", progress=100)
+
+
+def _draw_brand_hero(pid, c, path, force=False):
+    """The mascot is drawn once per channel and reused, so every video has the very same hero.
+    The first drawing uses the channel avatar as reference and is checked against it."""
+    p = get_project(pid)
+    master = _hero_master(p)
+    if master.exists() and not force:
+        shutil.copyfile(master, path)
+        log(pid, f"герой канала {c['name']} — беру утверждённый эталон", "illustrator")
+        return
+    avatar = _avatar(p)
+    for attempt in range(2):
+        log(pid, f"рисую героя канала {c['name']} по аватару канала", "illustrator")
+        images.generate(images.character_prompt(p["style"], c), path, "1:1",
+                        references=[avatar] if avatar else [], label=f"{c['name']}\n{c['description']}",
+                        seed=attempt)
+        if not avatar:
+            break
+        check = team.compare_character(avatar, path, c["name"], c["description"])
+        log(pid, f"сверка героя с аватаром: {check['score']}/10 {check.get('differences', '')}", "art_director")
+        if check["score"] >= 7:
+            break
+    shutil.copyfile(path, master)
 
 
 def _scene_audio(pid, idx, voice):
@@ -254,7 +357,47 @@ def stage_images(pid, force=False):
     _check(pid)
     if errors:
         raise RuntimeError(f"Не удалось сгенерировать кадры: {', '.join(str(i + 1) for i in errors)}")
+    _check_hero_frames(pid, only=None if force else set(todo))
     set_stage(pid, "images", status="done", progress=100)
+
+
+def _check_hero_frames(pid, only=None):
+    """Look at every frame with the mascot: is it really the same hero? Redraw mismatches once."""
+    p = get_project(pid)
+    hero = next((c for c in p["script"]["characters"] if c.get("brand_hero") and c.get("image")), None)
+    if not hero or not load_settings().get("hero_check", True):
+        return
+    ref = project_dir(pid) / hero["image"]
+    targets = [s["idx"] for s in p["script"]["scenes"]
+               if hero["id"] in s["characters"] and s["image"] and (only is None or s["idx"] in only)]
+    if not targets:
+        return
+    log(pid, f"проверяю героя на {len(targets)} кадрах", "art_director")
+
+    def check(i):
+        scene = get_project(pid)["script"]["scenes"][i]
+        r = team.compare_character(ref, project_dir(pid) / scene["image"], hero["name"], hero["description"])
+        fixed = False
+        if r["score"] < 6:
+            _scene_image(pid, i)
+            r = team.compare_character(ref, project_dir(pid) / get_project(pid)["script"]["scenes"][i]["image"],
+                                       hero["name"], hero["description"])
+            fixed = True
+        with edit_project(pid) as p2:
+            p2["script"]["scenes"][i]["hero_check"] = {"score": r["score"], "redrawn": fixed,
+                                                      "differences": r.get("differences", "")}
+        return r["score"], fixed
+
+    with ThreadPoolExecutor(4) as pool:
+        results = list(pool.map(lambda i: contextvars.copy_context().run(check, i), targets))
+    ok = sum(1 for score, _ in results if score >= 6)
+    redrawn = sum(1 for _, fixed in results if fixed)
+    summary = {"checked": len(results), "ok": ok, "redrawn": redrawn,
+               "avg": round(sum(score for score, _ in results) / len(results), 1)}
+    with edit_project(pid) as p2:
+        p2["hero_check"] = summary
+    log(pid, f"герой совпадает на {ok} из {len(results)} кадров (перерисовано {redrawn}), "
+             f"средняя оценка {summary['avg']}/10", "art_director")
 
 
 def stage_thumbnail(pid, force=False):

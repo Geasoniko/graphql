@@ -112,6 +112,7 @@ def channels():
     out = []
     for c in storage.list_channels():
         c["connected"] = youtube.is_connected(c["id"])
+        c["hero_master"] = (config.CHANNELS_DIR / c["id"] / "hero.png").exists()
         out.append(c)
     return out
 
@@ -246,10 +247,16 @@ def brand_restore(cid: str):
         _fail(e)
 
 
+@app.post("/api/channels/{cid}/hero/reset")
+def hero_reset(cid: str):
+    (config.CHANNELS_DIR / cid / "hero.png").unlink(missing_ok=True)
+    return {"ok": True}
+
+
 @app.get("/channel-media/{cid}/{name}")
 def channel_media(cid: str, name: str):
     f = (config.CHANNELS_DIR / cid / name).resolve()
-    if f.parent != (config.CHANNELS_DIR / cid).resolve() or f.suffix != ".jpg" or not f.is_file():
+    if f.parent != (config.CHANNELS_DIR / cid).resolve() or f.suffix not in (".jpg", ".png") or not f.is_file():
         raise HTTPException(404)
     return FileResponse(f, headers={"Cache-Control": "no-cache"})
 
