@@ -25,6 +25,10 @@ class LLMError(RuntimeError):
     pass
 
 
+class ImagesApiOnly(LLMError):
+    """The model is served only by OpenRouter's Image API."""
+
+
 # Set once OpenRouter refuses the web search plugin (account/workspace policy);
 # from then on agents that would search the web answer from their own knowledge.
 _web_blocked = False
@@ -39,15 +43,16 @@ def _headers(settings):
     }
 
 
-def _post(payload, settings, timeout=180, role=None):
-    payload = {**payload, "usage": {"include": True}}
-    backups = agents.candidates(payload["model"])
-    if len(backups) > 1:
-        payload["models"] = backups
+def _post(payload, settings, timeout=180, role=None, path="/chat/completions"):
+    if path == "/chat/completions":
+        payload = {**payload, "usage": {"include": True}}
+        backups = agents.candidates(payload["model"])
+        if len(backups) > 1:
+            payload["models"] = backups
     last = None
     for attempt in range(3):
         try:
-            r = requests.post(f"{API}/chat/completions", headers=_headers(settings),
+            r = requests.post(f"{API}{path}", headers=_headers(settings),
                               json=payload, timeout=timeout)
         except requests.RequestException as e:
             last = str(e)
@@ -193,8 +198,32 @@ def _data_url(path):
     return f"data:{mime};base64,{base64.b64encode(open(path, 'rb').read()).decode()}"
 
 
-# Image-only models (FLUX, Seedream, Qwen Image) refuse modalities ["image", "text"].
+# Image-only models (FLUX, Seedream, Qwen Image) refuse modalities ["image", "text"];
+# some of them are served only by OpenRouter's Image API (/images), not chat/completions.
 _image_only = set()
+_images_api = set()
+
+
+def _image_via_images_api(model, prompt, references, aspect, settings, role):
+    payload = {"model": model, "prompt": prompt, "aspect_ratio": aspect, "resolution": "1K"}
+    if references:
+        payload["input_references"] = [{"type": "image_url", "image_url": {"url": _data_url(ref)}}
+                                       for ref in references]
+    while True:
+        try:
+            data = _post(payload, settings, role=role, path="/images")
+            break
+        except LLMError as e:
+            if "resolution" in str(e) and "resolution" in payload:
+                payload.pop("resolution")  # a model that doesn't take the size tier
+            else:
+                raise
+    for img in data.get("data") or []:
+        if img.get("b64_json"):
+            return base64.b64decode(img["b64_json"])
+        if (img.get("url") or "").startswith("http"):
+            return requests.get(img["url"], timeout=120).content
+    raise LLMError(f"Модель не вернула картинку: {str(data)[:300]}")
 
 
 def _post_image(payload, settings, role):
@@ -204,6 +233,9 @@ def _post_image(payload, settings, role):
             return _post(payload, settings, role=role)
         except LLMError as e:
             text = str(e)
+            if "/images" in text and "chat/completions" in text:
+                _images_api.add(payload["model"])
+                raise ImagesApiOnly() from e
             if "output modalities" in text and payload["modalities"] != ["image"]:
                 payload["modalities"] = ["image"]
                 _image_only.add(payload["model"])
@@ -222,6 +254,8 @@ def generate_image(prompt, references=(), aspect="16:9", model=None, role="illus
     for ref in references:
         content.append({"type": "image_url", "image_url": {"url": _data_url(ref)}})
     model = model or agents.model_for(role) or settings["image_model"]
+    if model in _images_api:
+        return _image_via_images_api(model, prompt, references, aspect, settings, role)
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": content}],
@@ -230,7 +264,10 @@ def generate_image(prompt, references=(), aspect="16:9", model=None, role="illus
         "image_config": {"aspect_ratio": aspect, "image_size": "1K"},
     }
     for attempt in range(3):
-        data = _post_image(payload, settings, role)
+        try:
+            data = _post_image(payload, settings, role)
+        except ImagesApiOnly:
+            return _image_via_images_api(model, prompt, references, aspect, settings, role)
         msg = data["choices"][0]["message"]
         for img in msg.get("images") or []:
             url = img.get("image_url", {}).get("url", "")
@@ -258,4 +295,17 @@ def list_models(timeout=30):
             "completion_price": m.get("pricing", {}).get("completion"),
             "image_price": m.get("pricing", {}).get("image"),
         })
+    # Models served only by the Image API (FLUX and others) are listed separately.
+    try:
+        r = requests.get(f"{API}/images/models", timeout=timeout)
+        r.raise_for_status()
+        known = {m["id"] for m in out}
+        for m in r.json().get("data") or []:
+            if m.get("id") and m["id"] not in known:
+                _images_api.add(m["id"])
+                out.append({"id": m["id"], "name": m.get("name", m["id"]), "input": ["text", "image"],
+                            "output": ["image"], "prompt_price": None, "completion_price": None,
+                            "image_price": None})
+    except (requests.RequestException, ValueError, AttributeError):
+        pass
     return out
