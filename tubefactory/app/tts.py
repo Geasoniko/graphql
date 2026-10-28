@@ -107,11 +107,24 @@ def _kokoro_in_worker(text, voice, wav):
             if "ready" not in hello:
                 w["proc"] = None
                 raise RuntimeError("Kokoro не запустился — переустановите его в Настройках")
-        w["proc"].stdin.write(json.dumps({"text": text, "voice": voice, "out": str(wav)}) + "\n")
+        w["seq"] = job_id = w.get("seq", 0) + 1
+        w["proc"].stdin.write(json.dumps({"id": job_id, "text": text, "voice": voice, "out": str(wav)}) + "\n")
         w["proc"].stdin.flush()
-        reply = json.loads(w["proc"].stdout.readline() or '{"error": "Kokoro остановился"}')
+        while True:  # skip anything that isn't the answer to this very job
+            line = w["proc"].stdout.readline()
+            if not line:
+                w["proc"] = None
+                raise RuntimeError("Kokoro остановился — нажмите «Продолжить генерацию»")
+            try:
+                reply = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(reply, dict) and reply.get("id") == job_id:
+                break
     if "error" in reply:
         raise RuntimeError(f"Kokoro: {reply['error']}")
+    if not os.path.exists(wav):
+        raise RuntimeError("Kokoro не записал файл озвучки — нажмите «Продолжить генерацию»")
 
 
 def _kokoro_tts(text, voice, path):
@@ -131,8 +144,10 @@ def _kokoro_tts(text, voice, path):
         sf.write(wav, np.concatenate(chunks), 24000)
     else:
         _kokoro_in_worker(text, voice, wav)
-    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", wav, "-c:a", "libmp3lame", "-q:a", "2", str(path)],
-                   check=True)
+    done = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", wav, "-c:a", "libmp3lame", "-q:a", "2", str(path)],
+                          capture_output=True, text=True)
+    if done.returncode:
+        raise RuntimeError(f"ffmpeg не смог сохранить озвучку: {done.stderr.strip()[-300:]}")
     os.remove(wav)
     return None
 
