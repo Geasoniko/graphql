@@ -1033,9 +1033,6 @@ pages.settings = async () => {
 
       <h2 class="wide">YouTube</h2>
       <label class="wide">Файл OAuth-клиента Google (client_secret.json)<input id="s-youtube_client_secret" value="${esc(s.youtube_client_secret)}"></label>
-      <h2 class="wide">📱 Вход с телефона</h2>
-      <label class="wide">Пароль для входа с телефона и других устройств <span class="muted">(с этого ноутбука пароль не нужен)</span><input id="s-web_password" type="password" autocomplete="new-password" value="${esc(s.web_password || "")}" placeholder="придумайте пароль"></label>
-      <div class="wide muted small">Запускайте софт через <b>start_phone.bat</b>, установите Tailscale на ноутбук и телефон — адрес для телефона появится в чёрном окне.</div>
       <label class="wide">YouTube API key <span class="muted">(не обязательно: для анализа конкурентов, пока ни один канал не подключён)</span><input id="s-youtube_api_key" value="${esc(s.youtube_api_key || "")}"></label>
       <div class="wide"><button class="btn primary" id="s-save">Сохранить</button></div>
     </div>`;

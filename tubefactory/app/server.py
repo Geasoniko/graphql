@@ -1,13 +1,11 @@
 """HTTP API + static web UI."""
-import base64
 import re
-import secrets
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import agents, analytics, branding, company, competitors, config, jobs, llm, pipeline, pricing, scenarist, stats, storage, styles, system, tts, youtube
@@ -22,32 +20,6 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="TubeFactory", lifespan=lifespan)
-
-
-LOCAL = {"127.0.0.1", "::1", "localhost"}
-
-
-@app.middleware("http")
-async def password(request, call_next):
-    """This laptop opens the app freely; any other device (phone over Tailscale, Wi-Fi)
-    must log in with the password from Settings — the app holds paid API keys."""
-    proxied = any(h in request.headers for h in ("x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip"))
-    if request.client and request.client.host in LOCAL and not proxied:  # a tunnel also connects from localhost
-        return await call_next(request)
-    secret = config.load_settings().get("web_password") or ""
-    if not secret:
-        return PlainTextResponse("Доступ с других устройств закрыт: на ноутбуке задайте «Пароль для входа "
-                                 "с телефона» в Настройках TubeFactory.", status_code=403)
-    auth = request.headers.get("authorization", "")
-    if auth.startswith("Basic "):
-        try:
-            _, _, given = base64.b64decode(auth[6:]).decode("utf-8").partition(":")
-        except ValueError:
-            given = ""
-        if secrets.compare_digest(given.encode(), secret.encode()):
-            return await call_next(request)
-    return PlainTextResponse("Нужен пароль TubeFactory", status_code=401,
-                             headers={"WWW-Authenticate": 'Basic realm="TubeFactory", charset="UTF-8"'})
 
 
 @app.middleware("http")
