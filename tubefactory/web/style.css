@@ -242,3 +242,13 @@ input[type="range"] { padding: 0; accent-color: var(--accent-2); }
 .stat-row .bar { height: 8px; }
 .day-chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; margin: 8px 0; }
 .day-chart > div { flex: 1; background: linear-gradient(180deg, var(--accent), var(--accent-2)); border-radius: 3px 3px 0 0; min-width: 2px; }
+
+/* phone: the menu becomes one scrollable row, wide tables scroll sideways */
+@media (max-width: 800px) {
+  .sidebar { padding: 10px; }
+  .sidebar .brand-sub, .nav-title, .sidebar .foot { display: none; }
+  .nav { display: flex; flex-direction: row; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+  .nav a { flex: 0 0 auto; white-space: nowrap; }
+  .card table { display: block; overflow-x: auto; white-space: nowrap; }
+  .card table td { padding-right: 10px; }
+}

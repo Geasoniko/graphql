@@ -80,6 +80,15 @@ function allVoiceOptions(value, provider) {
     `<option value="${esc(prov + "|" + v.id)}" ${prov === provider && v.id === value ? "selected" : ""}>${esc(v.name)}</option>`).join("")}</optgroup>`).join("");
 }
 
+// "2026-11-02T15:00:00Z" -> "2026-11-02T20:00" in this computer's time zone, for <input type=datetime-local>.
+function toLocalInput(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 const money = (v) => "$" + (v || 0).toFixed(v && v < 0.1 ? 3 : 2);
 
 function agentName(role) {
@@ -338,7 +347,7 @@ function renderProject(p, keepScroll = false) {
         <label>Формат<select id="f-aspect">${options([["16:9", "16:9 — обычное видео"], ["9:16", "9:16 — Shorts"]], p.aspect)}</select></label>
         <label>Доступ на YouTube<select id="f-privacy">${options([["private", "Приватное"], ["unlisted", "По ссылке"], ["public", "Публичное"]], p.privacy)}</select></label>
         <label>Лимит расходов на это видео, $ <span class="muted">(пусто — как в Настройках, 0 — без лимита)</span><input id="f-budget" type="number" step="0.5" min="0" value="${p.budget ?? ""}" placeholder="${cache.settings.video_budget}"></label>
-        <label>Отложенная публикация (UTC)<input id="f-publish_at" placeholder="2026-10-26T15:00:00Z" value="${esc(p.publish_at || "")}"></label>
+        <label>📅 Выйдет на YouTube <span class="muted">(ваше время; пусто — сразу или в лучший час канала)</span><input id="f-publish_at" type="datetime-local" value="${toLocalInput(p.publish_at)}"></label>
         <label class="wide">Стиль картинок (English)<textarea id="f-style">${esc(p.style)}</textarea></label>
         <label class="check"><input type="checkbox" id="f-auto_upload" ${p.auto_upload ? "checked" : ""}> Загрузить на YouTube после сборки</label>
         <div class="wide"><button class="btn" id="p-save">Сохранить настройки</button>
@@ -465,7 +474,9 @@ function bindProject(p) {
   };
   $("#p-save").onclick = (e) => guard(async () => {
     const body = {};
-    for (const k of ["idea", "channel_id", "language", "pacing", "aspect", "privacy", "publish_at", "style"]) body[k] = $(`#f-${k}`).value || null;
+    for (const k of ["idea", "channel_id", "language", "pacing", "aspect", "privacy", "style"]) body[k] = $(`#f-${k}`).value || null;
+    // The browser gives local time; YouTube wants UTC.
+    body.publish_at = $("#f-publish_at").value ? new Date($("#f-publish_at").value).toISOString().replace(/\.\d{3}Z$/, "Z") : null;
     [body.voice_provider, body.voice] = $("#f-voice").value.split("|");
     const voiceChanged = body.voice !== p.voice || body.voice_provider !== (p.voice_provider || cache.settings.tts_provider);
     body.budget = $("#f-budget").value === "" ? null : +$("#f-budget").value;
@@ -1022,6 +1033,9 @@ pages.settings = async () => {
 
       <h2 class="wide">YouTube</h2>
       <label class="wide">Файл OAuth-клиента Google (client_secret.json)<input id="s-youtube_client_secret" value="${esc(s.youtube_client_secret)}"></label>
+      <h2 class="wide">📱 Вход с телефона</h2>
+      <label class="wide">Пароль для входа с телефона и других устройств <span class="muted">(с этого ноутбука пароль не нужен)</span><input id="s-web_password" type="password" autocomplete="new-password" value="${esc(s.web_password || "")}" placeholder="придумайте пароль"></label>
+      <div class="wide muted small">Запускайте софт через <b>start_phone.bat</b>, установите Tailscale на ноутбук и телефон — адрес для телефона появится в чёрном окне.</div>
       <label class="wide">YouTube API key <span class="muted">(не обязательно: для анализа конкурентов, пока ни один канал не подключён)</span><input id="s-youtube_api_key" value="${esc(s.youtube_api_key || "")}"></label>
       <div class="wide"><button class="btn primary" id="s-save">Сохранить</button></div>
     </div>`;

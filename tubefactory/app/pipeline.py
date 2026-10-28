@@ -582,6 +582,14 @@ def stage_upload(pid, force=False):
         raise RuntimeError("У проекта не выбран канал")
     set_stage(pid, "upload", status="running", progress=0, error=None)
     publish_at = p.get("publish_at")
+    if publish_at:
+        import datetime as _dt
+        when = _dt.datetime.fromisoformat(publish_at.replace("Z", "+00:00"))
+        if when <= _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(minutes=5):
+            log(pid, "время отложенной публикации уже прошло — публикую сразу", "publisher")
+            publish_at = None
+        else:
+            log(pid, f"видео выйдет само: {when.astimezone():%d.%m.%Y %H:%M} (ваше время)", "publisher")
     ch = storage.get_channel(p["channel_id"])
     if not publish_at and p["privacy"] == "public" and ch.get("best_hours"):
         # Publisher waits for the analyst's best hour instead of going live right away.
