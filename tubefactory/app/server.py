@@ -15,6 +15,7 @@ from .config import WEB
 @asynccontextmanager
 async def lifespan(_app):
     jobs.start()
+    system.warm_up()
     yield
 
 

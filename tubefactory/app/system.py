@@ -63,8 +63,24 @@ def kokoro_installed():
         return True
     if _kpy["installed"] is None:
         cmd = kokoro_python()
-        _kpy["installed"] = bool(cmd) and _run(cmd + ["-c", "import kokoro, soundfile; print('ok')"], 60) == "ok"
+        # find_spec only looks the packages up; importing kokoro would load PyTorch (30+ s on Windows).
+        probe = ("import importlib.util as u; "
+                 "print('ok' if u.find_spec('kokoro') and u.find_spec('soundfile') else '')")
+        _kpy["installed"] = bool(cmd) and _run(cmd + ["-c", probe]) == "ok"
     return _kpy["installed"]
+
+
+def warm_up():
+    """Run the slow checks once in the background at start, so the first page load doesn't wait."""
+    def run():
+        from . import pricing, tts
+        from .config import load_settings
+        kokoro_installed()
+        settings = load_settings()
+        if settings.get("elevenlabs_api_key"):
+            tts.elevenlabs_voices(settings)
+        pricing.price("")  # fetches the OpenRouter catalogue for cost estimates
+    threading.Thread(target=run, daemon=True, name="warm-up").start()
 
 
 def installed(module):
