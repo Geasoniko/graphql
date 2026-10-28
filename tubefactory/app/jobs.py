@@ -69,6 +69,9 @@ def _worker():
             except Exception as e:
                 job.update(status="error", error=str(e)[:500])
                 traceback.print_exc()
+                with _lock:
+                    # Later jobs of this project build on this one (re-voice, then re-render): drop them.
+                    _queue[:] = [j for j in _queue if j["project_id"] != job["project_id"]]
             job["finished_at"] = storage.now()
             with _lock:
                 _current = None

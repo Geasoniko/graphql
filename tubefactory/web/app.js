@@ -72,6 +72,14 @@ function voiceOptions(value, provider) {
   return options(list, known ? value : list[0]?.id);
 }
 
+// Every voice of every usable service, grouped; value is "provider|voice".
+function allVoiceOptions(value, provider) {
+  provider = provider || cache.settings.tts_provider;
+  const providers = cache.voices.available || [provider];
+  return providers.map((prov) => `<optgroup label="${esc(PROVIDER_NAMES[prov] || prov)}">${voiceList(prov).map((v) =>
+    `<option value="${esc(prov + "|" + v.id)}" ${prov === provider && v.id === value ? "selected" : ""}>${esc(v.name)}</option>`).join("")}</optgroup>`).join("");
+}
+
 const money = (v) => "$" + (v || 0).toFixed(v && v < 0.1 ? 3 : 2);
 
 function agentName(role) {
@@ -321,7 +329,7 @@ function renderProject(p, keepScroll = false) {
         <label class="wide">Идея<textarea id="f-idea">${esc(p.idea)}</textarea></label>
         <label>Канал<select id="f-channel_id">${chOptions}</select></label>
         <label>Язык озвучки<select id="f-language">${options(LANGUAGES, p.language)}</select></label>
-        <label>Голос<select id="f-voice">${voiceOptions(p.voice, p.voice_provider)}</select></label>
+        <label>Голос <a href="#" id="f-voice-gallery" class="small">🎧 выбрать на слух</a><select id="f-voice">${allVoiceOptions(p.voice, p.voice_provider)}</select></label>
         <label>Кол-во сцен <span id="f-est" class="badge">~${money(p.estimate?.total)}</span><input id="f-scene_count" type="number" min="1" max="200" value="${p.scene_count}"></label>
         <label>Ритм кадров<select id="f-pacing">${options([["calm", "Спокойный: кадр на 2-4 фразы"], ["dynamic", "Динамичный: кадр на каждую фразу"], ["economy", "Эконом: 1 картинка на 4–6 фраз, 2 ракурса — в 2 раза дешевле"]], p.pacing)}</select></label>
         <label>Формат<select id="f-aspect">${options([["16:9", "16:9 — обычное видео"], ["9:16", "9:16 — Shorts"]], p.aspect)}</select></label>
@@ -440,16 +448,33 @@ function bindProject(p) {
     if (done ? confirm(`Переделать этап «${STAGE_NAMES[k]}» с нуля?\nЭто снова потратит деньги на весь этап.`)
              : confirm(`Продолжить этап «${STAGE_NAMES[k]}»? Готовое останется, доделается только недостающее.`)) run(k, done);
   };
+  $("#f-voice-gallery").onclick = (e) => {
+    e.preventDefault();
+    const [voice_provider, voice] = $("#f-voice").value.split("|");
+    openVoiceGallery(null, { title: p.title, voice, voice_provider }, (v, prov) => {
+      $("#f-voice").value = `${prov}|${v}`;
+      toast("Голос выбран — нажмите «Сохранить»");
+    });
+  };
   $("#p-save").onclick = (e) => guard(async () => {
     const body = {};
-    for (const k of ["idea", "channel_id", "language", "voice", "pacing", "aspect", "privacy", "publish_at", "style"]) body[k] = $(`#f-${k}`).value || null;
+    for (const k of ["idea", "channel_id", "language", "pacing", "aspect", "privacy", "publish_at", "style"]) body[k] = $(`#f-${k}`).value || null;
+    [body.voice_provider, body.voice] = $("#f-voice").value.split("|");
+    const voiceChanged = body.voice !== p.voice || body.voice_provider !== (p.voice_provider || cache.settings.tts_provider);
     body.budget = $("#f-budget").value === "" ? null : +$("#f-budget").value;
     body.idea = body.idea || "";
     body.style = body.style || "";
     body.scene_count = +$("#f-scene_count").value;
     body.auto_upload = $("#f-auto_upload").checked;
     await api(`/api/projects/${pid}`, { method: "PUT", body });
-    toast("Сохранено"); await reload();
+    toast("Сохранено");
+    if (voiceChanged && p.stages.audio.status === "done" &&
+        confirm("Голос изменён. Переозвучить всё видео новым голосом и пересобрать ролик?\n(Edge и Kokoro — бесплатно)")) {
+      await api(`/api/projects/${pid}/run`, { body: { stage: "audio", force: true } });
+      await api(`/api/projects/${pid}/run`, { body: { stage: "all", force: false } });
+      toast("Переозвучка в очереди");
+    }
+    await reload();
   }, e.target);
   $$("[data-tab]").forEach((b) => b.onclick = () => { projectTab = b.dataset.tab; renderProject(p, true); });
   $("#f-scene_count").oninput = async (e) => {
@@ -959,15 +984,16 @@ async function openCompare(p, idx) {
 
 const playing = { audio: null };
 
-function openVoiceGallery(channelId) {
-  const ch = cache.channels.find((c) => c.id === channelId);
+// For a channel by default; a project passes itself (`ch`) and what to do with the picked voice.
+function openVoiceGallery(channelId, ch, onPick) {
+  ch = ch || cache.channels.find((c) => c.id === channelId);
   const providers = cache.voices.available || ["edge"];
   let tab = providers.includes(ch.voice_provider) ? ch.voice_provider
     : providers.includes(cache.settings.tts_provider) ? cache.settings.tts_provider : providers[0];
   const draw = () => {
     const current = (ch.voice_provider || cache.settings.tts_provider) === tab ? ch.voice : null;
     $("#modal-root").innerHTML = `<div class="modal-back" id="vg-back"><div class="modal" style="width:min(720px,100%)">
-      <h2>🎙 Голос для «${esc(ch.name)}»</h2>
+      <h2>🎙 Голос для «${esc(ch.name || ch.title || "проекта")}»</h2>
       <div class="tabs" style="margin-bottom:12px">${providers.map((p) => `<button class="btn sm ${p === tab ? "active" : ""}" data-vtab="${p}">${esc(PROVIDER_NAMES[p] || p)}</button>`).join("")}</div>
       <div class="muted small" style="margin-bottom:8px">▶ — послушать образец (озвучивается один раз, повторно бесплатно). Kokoro в первый раз загружается ~1 мин.</div>
       <div class="col" style="max-height:55vh;overflow:auto">${voiceList(tab).map((v) => `
@@ -991,6 +1017,7 @@ function openVoiceGallery(channelId) {
       } finally { b.textContent = "▶"; }
     }));
     $$("[data-pick]").forEach((b) => b.onclick = () => guard(async () => {
+      if (onPick) { onPick(b.dataset.pick, tab); closeModal(); return; }
       await api("/api/channels", { body: { id: channelId, voice: b.dataset.pick, voice_provider: tab } });
       Object.assign(ch, { voice: b.dataset.pick, voice_provider: tab });
       toast("Голос канала выбран — новые видео будут с ним");

@@ -7,6 +7,7 @@ import contextvars
 import random
 import re
 import shutil
+import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import agents, company, images, pricing, scenarist, storage, team, tts, video, youtube
@@ -352,15 +353,21 @@ def _scene_audio(pid, idx, voice):
 def stage_audio(pid, force=False):
     p = get_project(pid)
     scenes = p["script"]["scenes"]
-    set_stage(pid, "audio", status="running", progress=0, error=None)
-    log(pid, "озвучиваю…", "voice")
-    for i, s in enumerate(scenes):
+    todo = [i for i, s in enumerate(scenes) if force or not s["audio"]]
+    set_stage(pid, "audio", status="running", progress=0, error=None, note=f"0/{len(todo)}")
+    log(pid, f"озвучиваю {len(todo)} сцен ({p.get('voice_provider') or load_settings()['tts_provider']}, "
+             f"{p['voice']})…", "voice")
+    started = _time.time()
+    for n, i in enumerate(todo, 1):
         _check(pid)
-        if s["audio"] and not force:
-            continue
         _scene_audio(pid, i, p["voice"])
-        set_stage(pid, "audio", progress=int((i + 1) / len(scenes) * 100))
-    set_stage(pid, "audio", status="done", progress=100)
+        set_stage(pid, "audio", progress=int(n / len(todo) * 100), note=f"{n}/{len(todo)}")
+    if todo:
+        log(pid, f"озвучено {len(todo)} сцен за {(_time.time() - started) / 60:.1f} мин", "voice")
+        with edit_project(pid) as p2:
+            if p2["stages"]["render"]["status"] == "done":
+                p2["stages"]["render"]["status"] = "stale"  # the video still has the old voice
+    set_stage(pid, "audio", status="done", progress=100, note=None)
 
 
 def _scene_image(pid, idx):
