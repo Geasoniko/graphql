@@ -131,11 +131,15 @@ Give {count} ideas."""
         return demo_ideas(niche or "history")
 
 
-def ideas_for_niche(niche, count=8, avoid=()):
+def ideas_for_niche(niche, count=8, avoid=(), brief=""):
+    """brief: the channel dossier (language, format, mascot, what works); without it the
+    ideas target an English-speaking US audience."""
     avoid_txt = "\n".join(f"- {t}" for t in list(avoid)[-60:])
-    user = f"""Niche: {niche}
+    user = f"""{brief or f"Niche: {niche}"}
+
 Search the web for what is trending right now in this niche on YouTube (recent viral videos,
-rising search queries, news hooks). Propose {count} new viral video ideas for an English-speaking (US) audience.
+rising search queries, news hooks). Propose {count} new viral video ideas that fit this channel
+{"(its language, format and mascot)" if brief else "for an English-speaking (US) audience"}; build on what works.
 Do not repeat these existing titles:
 {avoid_txt or '(none)'}
 

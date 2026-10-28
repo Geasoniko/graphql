@@ -97,7 +97,8 @@ def _plan_video(channel_id, ideas, scene_count=None):
     titles = [p["title"] for p in projects]
     if not ideas:
         company.feed("researcher", f"ищу тренды для «{ch['name']}»…", channel_id=channel_id)
-        found = scenarist.ideas_for_niche(ch.get("niche") or ch["name"], count=6, avoid=titles)
+        found = scenarist.ideas_for_niche(ch.get("niche") or ch["name"], count=6, avoid=titles,
+                                          brief=team.channel_brief(ch, company.report(channel_id)))
         ideas = [i for i in found.get("ideas", []) if i.get("title") not in titles]
         company.feed("researcher", "идеи: " + "; ".join(i.get("title", "") for i in ideas[:6]),
                      channel_id=channel_id)

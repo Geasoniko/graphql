@@ -118,15 +118,41 @@ JSON: {{"tags": ["15-25 tags, mix of broad and long-tail, total under 450 charac
     return _ask("tagger", system, user, {})
 
 
+# ---------- channel brief (shared by researcher and director) ----------
+
+def channel_brief(channel, report=None):
+    """Everything the planning team should know about a channel, as plain text."""
+    brand = channel.get("brand") or {}
+    hero = brand.get("hero") or {}
+    seconds = {"calm": 11, "dynamic": 4}.get(channel.get("pacing"), 11)
+    minutes = round((channel.get("scene_count") or 20) * seconds / 60)
+    lines = [
+        f"Channel: {channel.get('name')}",
+        f"Niche: {channel.get('niche') or channel.get('name')}",
+        f"Video language / audience: {channel.get('language') or 'English'}",
+        f"Format: {channel.get('aspect', '16:9')} video, about {minutes} min, faceless animated explainer",
+    ]
+    if brand:
+        lines.append(f"Visual brand: {brand.get('style_name', '')} — {brand.get('style_prompt', '')[:300]}")
+    if hero.get("name"):
+        lines.append(f"Recurring mascot (stars in every video): {hero['name']} — {hero.get('description', '')}")
+    if report:
+        if report.get("what_works"):
+            lines.append("What works on this channel: " + "; ".join(report["what_works"]))
+        if report.get("what_fails"):
+            lines.append("What fails: " + "; ".join(report["what_fails"]))
+        if report.get("next_topics"):
+            lines.append("Analyst's suggested next topics: " + "; ".join(report["next_topics"]))
+    return "\n".join(lines)
+
+
 # ---------- director ----------
 
 def director_plan(channel, ideas, report, recent):
     system = """You are the director of a YouTube media company that runs several faceless channels.
 You decide what the team produces next to grow views and revenue. Be decisive, data-driven, think about
 what already worked on this channel. Reply in JSON only; reasoning in Russian."""
-    user = f"""Channel: {channel.get('name')}
-Niche: {channel.get('niche')}
-Visual style: {channel.get('style')}
+    user = f"""{channel_brief(channel)}
 Recent videos with stats (title, views, age): {json.dumps(recent, ensure_ascii=False)[:6000]}
 Channel analyst report: {json.dumps(report or {}, ensure_ascii=False)[:6000]}
 Ideas proposed by the trend researcher: {json.dumps(ideas, ensure_ascii=False)[:8000]}

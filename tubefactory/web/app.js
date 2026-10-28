@@ -945,6 +945,10 @@ function openNewVideo() {
       if (!idea) { toast("Напишите идею видео", true); return; }
       p = await api("/api/projects", { body: { idea, channel_id: cid, scene_count, start: true } });
     } else {
+      if (!(chosen().niche || "").trim()) {
+        toast("У канала не указана ниша — директору не от чего искать темы. Заполните её в «Каналы».", true);
+        return;
+      }
       e.target.textContent = "👔 Директор думает…";
       p = await api(`/api/channels/${cid}/plan`, { body: { start: true, scene_count } });
     }
