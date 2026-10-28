@@ -20,9 +20,17 @@ FALLBACK = {
     "openai/gpt-5.5": (5e-6, 30e-6),
     "google/gemini-3.1-flash-image": (0.5e-6, 60e-6),
     "google/gemini-3.1-flash-image-preview": (0.5e-6, 60e-6),
-    "google/gemini-3.1-flash-lite-image": (0.25e-6, 1.5e-6),
+    "google/gemini-3.1-flash-lite-image": (0.25e-6, 30e-6),
 }
 DEFAULT_PRICE = (2e-6, 10e-6)
+# Image models billed per picture (≈1920x1080 output), from OpenRouter's model pages.
+PER_IMAGE = {
+    "qwen/qwen-image-3": 0.03,
+    "bytedance-seed/seedream-5-0-flash": 0.018,
+    "bytedance-seed/seedream-4.5": 0.04,
+    "black-forest-labs/flux.2-klein-4b": 0.015,
+    "sourceful/riverflow-v2-fast": 0.02,
+}
 IMAGE_TOKENS = 1290       # output tokens of one ~1K image on Gemini image models
 WEB_SEARCH = 0.03         # OpenRouter web plugin, ~8 results per call
 REWRITE_SHARE = 0.5       # how often the chief editor sends a script back
@@ -63,6 +71,8 @@ def price(model):
     for m in agents.candidates(model):
         if m in FALLBACK:
             return (*FALLBACK[m], 0)
+        if m in PER_IMAGE:
+            return (0, 0, PER_IMAGE[m])
     return (*DEFAULT_PRICE, 0)
 
 
