@@ -193,6 +193,26 @@ def _data_url(path):
     return f"data:{mime};base64,{base64.b64encode(open(path, 'rb').read()).decode()}"
 
 
+# Image-only models (FLUX, Seedream, Qwen Image) refuse modalities ["image", "text"].
+_image_only = set()
+
+
+def _post_image(payload, settings, role):
+    """Image models differ in what they accept: adapt the request to the model's complaint and retry."""
+    while True:
+        try:
+            return _post(payload, settings, role=role)
+        except LLMError as e:
+            text = str(e)
+            if "output modalities" in text and payload["modalities"] != ["image"]:
+                payload["modalities"] = ["image"]
+                _image_only.add(payload["model"])
+            elif "image_size" in text and "image_size" in payload["image_config"]:
+                payload["image_config"].pop("image_size")  # a model that doesn't take the size hint
+            else:
+                raise
+
+
 def generate_image(prompt, references=(), aspect="16:9", model=None, role="illustrator"):
     """Return PNG/JPEG bytes. references: image paths used for character consistency."""
     settings = load_settings()
@@ -201,21 +221,16 @@ def generate_image(prompt, references=(), aspect="16:9", model=None, role="illus
     content = [{"type": "text", "text": prompt}]
     for ref in references:
         content.append({"type": "image_url", "image_url": {"url": _data_url(ref)}})
+    model = model or agents.model_for(role) or settings["image_model"]
     payload = {
-        "model": model or agents.model_for(role) or settings["image_model"],
+        "model": model,
         "messages": [{"role": "user", "content": content}],
-        "modalities": ["image", "text"],
+        "modalities": ["image"] if model in _image_only else ["image", "text"],
         # 1K is plenty for a 1080p video; per-image models bill by resolution tier.
         "image_config": {"aspect_ratio": aspect, "image_size": "1K"},
     }
     for attempt in range(3):
-        try:
-            data = _post(payload, settings, role=role)
-        except LLMError as e:
-            if "image_size" not in str(e) or "image_size" not in payload["image_config"]:
-                raise
-            payload["image_config"].pop("image_size")  # a model that doesn't take the size hint
-            data = _post(payload, settings, role=role)
+        data = _post_image(payload, settings, role)
         msg = data["choices"][0]["message"]
         for img in msg.get("images") or []:
             url = img.get("image_url", {}).get("url", "")

@@ -436,7 +436,9 @@ function bindProject(p) {
     const b = e.target.closest("[data-step]");
     if (!b || b.classList.contains("locked")) return;
     const k = b.dataset.step, done = b.classList.contains("done");
-    if (confirm(`${done ? "Переделать" : "Запустить"} этап «${STAGE_NAMES[k]}»?${done ? "\nЭто снова потратит деньги на этот этап." : ""}`)) run(k, true);
+    // Unfinished stage: continue it (keeps what is already made). Finished one: redo from scratch.
+    if (done ? confirm(`Переделать этап «${STAGE_NAMES[k]}» с нуля?\nЭто снова потратит деньги на весь этап.`)
+             : confirm(`Продолжить этап «${STAGE_NAMES[k]}»? Готовое останется, доделается только недостающее.`)) run(k, done);
   };
   $("#p-save").onclick = (e) => guard(async () => {
     const body = {};

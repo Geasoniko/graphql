@@ -620,6 +620,12 @@ def run(pid, stage="all", force=False):
         _run(pid, stage, force)
 
 
+def _finished(p, stage):
+    if stage == "script" and p["script"] or stage == "thumbnail" and p["thumbnail"]:
+        return True  # these stages keep their result even after a later error
+    return p["stages"][stage]["status"] == "done"
+
+
 def _run(pid, stage, force):
     order = list(STAGE_FUNCS) if stage == "all" else [stage]
     p = get_project(pid)
@@ -628,8 +634,15 @@ def _run(pid, stage, force):
     current = None
     try:
         for current in order:
+            if stage == "all" and _finished(get_project(pid), current):
+                if get_project(pid)["stages"][current]["status"] != "done":
+                    set_stage(pid, current, status="done", progress=100, error=None)
+                continue  # finished stages are kept; a stop is reported on the stage that still has work
             _check(pid)
             STAGE_FUNCS[current](pid, force=force and stage != "all")
+            if get_project(pid)["stages"][current]["status"] != "done":
+                # A stage whose result already existed returns early; clear its old error.
+                set_stage(pid, current, status="done", progress=100, error=None)
     except Cancelled:
         set_stage(pid, current, status="idle", error="остановлено")
         log(pid, "Остановлено")
