@@ -20,6 +20,7 @@ FALLBACK = {
     "openai/gpt-5.5": (5e-6, 30e-6),
     "google/gemini-3.1-flash-image": (0.5e-6, 60e-6),
     "google/gemini-3.1-flash-image-preview": (0.5e-6, 60e-6),
+    "google/gemini-3.1-flash-lite-image": (0.25e-6, 1.5e-6),
 }
 DEFAULT_PRICE = (2e-6, 10e-6)
 IMAGE_TOKENS = 1290       # output tokens of one ~1K image on Gemini image models

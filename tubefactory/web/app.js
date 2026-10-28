@@ -374,6 +374,7 @@ function renderTab(p) {
           <div class="row">
             <button class="btn sm" data-regen="${s.idx}" data-what="image">🖼 Перерисовать</button>
             <button class="btn sm" data-regen="${s.idx}" data-what="audio">🔊 Переозвучить</button>
+            <button class="btn sm" data-compare="${s.idx}" title="Нарисовать эту сцену разными моделями и сравнить цену и качество">🧪</button>
             ${s.audio ? `<button class="btn sm" data-play="${media(p.id, s.audio)}">▶</button>` : ""}
           </div>
         </div>
@@ -454,6 +455,7 @@ function bindProject(p) {
   };
   $$("[data-zoom]").forEach((el) => el.dataset.zoom && $("img", el) && (el.onclick = () => lightbox(el.dataset.zoom)));
   $$("[data-play]").forEach((b) => b.onclick = () => new Audio(b.dataset.play).play());
+  $$("[data-compare]").forEach((b) => b.onclick = () => openCompare(p, +b.dataset.compare));
   $$("[data-regen]").forEach((b) => b.onclick = () => guard(async () => {
     await saveScenes(p, false);
     b.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div>';
@@ -909,6 +911,46 @@ function closeModal() { $("#modal-root").innerHTML = ""; }
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { closeModal(); $$(".lightbox").forEach((x) => x.remove()); }
 });
+
+// ---------------- image model comparison ----------------
+
+async function openCompare(p, idx) {
+  const c = await api("/api/images/candidates");
+  const ids = c.models.map((m) => m.id);
+  if (!ids.includes(c.current)) c.models.unshift({ id: c.current, name: "текущая модель" });
+  $("#modal-root").innerHTML = `<div class="modal-back" id="cmp-back"><div class="modal" style="width:min(1100px,100%)">
+    <h2>🧪 Сравнить модели картинок — сцена ${idx + 1}</h2>
+    <div class="muted small" style="margin-bottom:10px">Одна и та же сцена (тот же промпт и образец героя) рисуется каждой моделью. Видна реальная цена картинки и совпадение героя. Каждая картинка стоит денег (обычно $0.002–0.08).</div>
+    <div class="row" style="margin-bottom:12px">${c.models.map((m) => `<label class="check" style="font-size:13px"><input type="checkbox" data-m="${esc(m.id)}" checked> ${esc(m.name)} <span class="muted small">${esc(m.id)}</span></label>`).join("")}</div>
+    <div class="row"><input id="cmp-extra" placeholder="ещё модель OpenRouter, например black-forest-labs/flux.2-klein" style="flex:1">
+      <button class="btn primary" id="cmp-go">🧪 Нарисовать</button><button class="btn" id="cmp-close">Закрыть</button></div>
+    <div class="grid-2" id="cmp-res" style="margin-top:14px"></div>
+  </div></div>`;
+  $("#cmp-close").onclick = closeModal;
+  $("#cmp-back").onclick = (e) => { if (e.target.id === "cmp-back") closeModal(); };
+  $("#cmp-go").onclick = (e) => guard(async () => {
+    const models = $$("[data-m]").filter((x) => x.checked).map((x) => x.dataset.m);
+    if ($("#cmp-extra").value.trim()) models.push($("#cmp-extra").value.trim());
+    $("#cmp-res").innerHTML = models.map(() => '<div class="card" style="display:grid;place-items:center;min-height:200px"><div class="spinner"></div></div>').join("");
+    const res = await api(`/api/projects/${p.id}/scenes/${idx}/compare`, { body: { models } });
+    $("#cmp-res").innerHTML = res.map((r) => `<div class="card col">
+      <b>${esc(r.model)}</b>
+      ${r.error ? `<div class="alert">${esc(r.error)}</div>` : `
+        <img src="${r.url}" style="width:100%;border-radius:10px;cursor:zoom-in" data-zoom-src="${r.url}">
+        <div class="row small"><span class="badge ok">💰 ${money(r.cost)} за картинку</span><span class="badge">⏱ ${r.seconds} с</span>
+          ${r.hero_score != null ? `<span class="badge ${r.hero_score >= 7 ? "ok" : "warn"}">🧬 герой ${r.hero_score}/10</span>` : ""}
+          <span class="muted">видео 8 мин (эконом, ~24 кадра) ≈ ${money(r.cost * 24)}</span></div>
+        <button class="btn sm ${r.model === c.current ? "" : "primary"}" data-use="${esc(r.model)}" ${r.model === c.current ? "disabled" : ""}>${r.model === c.current ? "используется сейчас" : "✅ Рисовать этой моделью"}</button>`}
+    </div>`).join("");
+    $$("[data-zoom-src]", $("#cmp-res")).forEach((img) => img.onclick = () => lightbox(img.dataset.zoomSrc));
+    $$("[data-use]").forEach((b) => b.onclick = () => guard(async () => {
+      await api("/api/agents", { method: "PUT", body: { illustrator: b.dataset.use } });
+      c.current = b.dataset.use;
+      toast("Художник теперь рисует этой моделью (в Компании можно вернуть)");
+      b.textContent = "используется сейчас"; b.disabled = true;
+    }, b));
+  }, e.target);
+}
 
 // ---------------- voice gallery ----------------
 

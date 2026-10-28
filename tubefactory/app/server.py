@@ -429,6 +429,38 @@ def regenerate(pid: str, idx: int, body: dict = Body(default={})):
     return project(pid)
 
 
+IMAGE_CANDIDATES = [
+    {"id": "google/gemini-3.1-flash-image", "name": "Nano Banana 2 (сейчас)"},
+    {"id": "google/gemini-3.1-flash-lite-image", "name": "Nano Banana 2 Lite"},
+    {"id": "qwen/qwen-image-3", "name": "Qwen Image 3"},
+    {"id": "bytedance-seed/seedream-5-0-flash", "name": "Seedream 5.0 Flash"},
+]
+
+
+@app.get("/api/images/candidates")
+def image_candidates():
+    return {"current": agents.model_for("illustrator"), "models": IMAGE_CANDIDATES}
+
+
+@app.post("/api/projects/{pid}/scenes/{idx}/compare")
+def compare_models(pid: str, idx: int, body: dict = Body(default={})):
+    p = _project(pid)
+    if not p["script"] or idx >= len(p["script"]["scenes"]):
+        raise HTTPException(404, "Сцена не найдена")
+    models = [m.strip() for m in body.get("models") or [] if m.strip()][:5]
+    if not models:
+        _fail("Выберите модели для сравнения")
+    return pipeline.compare_image_models(pid, idx, models)
+
+
+@app.get("/compare-media/{name}")
+def compare_media(name: str):
+    f = (config.DATA / "compare" / name).resolve()
+    if f.parent != (config.DATA / "compare").resolve() or not f.is_file():
+        raise HTTPException(404)
+    return FileResponse(f)
+
+
 @app.get("/api/queue")
 def queue():
     return jobs.snapshot()

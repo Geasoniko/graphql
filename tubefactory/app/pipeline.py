@@ -347,6 +347,43 @@ def _scene_image(pid, idx):
         p2["script"]["scenes"][idx].update(image=_rel(pid, path), status="done", error=None)
 
 
+def compare_image_models(pid, idx, models):
+    """Draw one scene with several image models side by side, with the real cost of each,
+    so the owner can judge quality per dollar on their own content."""
+    import time as _time
+    from .config import DATA
+    p = get_project(pid)
+    scene = p["script"]["scenes"][idx]
+    chars = p["script"]["characters"]
+    refs = [project_dir(pid) / c["image"] for c in chars if c["id"] in scene["characters"] and c["image"]]
+    prompt = images.scene_prompt(p["style"], scene, chars)
+    hero = next((c for c in chars if c.get("brand_hero") and c.get("image")), None)
+    out_dir = DATA / "compare"
+    out_dir.mkdir(exist_ok=True)
+    stamp = _time.strftime("%Y%m%d%H%M%S")
+
+    def one(model):
+        spent = []
+        path = out_dir / f"{stamp}_{re.sub(r'[^A-Za-z0-9]+', '_', model)}.png"
+        started = _time.time()
+        try:
+            with company.booking(lambda role, cost: spent.append((role, cost))):
+                images.generate(prompt, path, p["aspect"], references=refs, seed=idx, model=model,
+                                label=f"{model}\n{scene['narration']}")
+                check = (team.compare_character(project_dir(pid) / hero["image"], path, hero["name"],
+                                                hero["description"])
+                         if hero and hero["id"] in scene["characters"] else None)
+        except Exception as e:
+            return {"model": model, "error": str(e)[:300]}
+        return {"model": model, "url": f"/compare-media/{path.name}",
+                "cost": round(sum(c for r, c in spent if r == "illustrator"), 4),
+                "seconds": round(_time.time() - started, 1),
+                "hero_score": check["score"] if check else None}
+
+    with ThreadPoolExecutor(4) as pool:
+        return list(pool.map(lambda m: contextvars.copy_context().run(one, m), models))
+
+
 def stage_images(pid, force=False):
     p = get_project(pid)
     scenes = p["script"]["scenes"]
